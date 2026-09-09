@@ -1446,14 +1446,14 @@ class App {
     async _aiUpscaleExport(scale, mimeType, quality, onBlob, btn) {
         try {
             btn.textContent = '⏳ Loading AI model...';
+            console.log('[AI Upscale] Step 1: Loading Transformers.js');
 
-            // Load Transformers.js (reuse if already loaded)
             if (!this._transformersPromise) {
                 this._transformersPromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
             }
             const transformers = await this._transformersPromise;
+            console.log('[AI Upscale] Step 2: Transformers loaded, creating pipeline');
 
-            // Create upscaler pipeline (cached)
             if (!this._upscalePipeline) {
                 btn.textContent = '⏳ Downloading SR model (~5MB)...';
                 this._upscalePipeline = await transformers.pipeline(
@@ -1462,13 +1462,12 @@ class App {
                     { dtype: 'fp32' }
                 );
             }
-            const upscaler = this._upscalePipeline;
+            console.log('[AI Upscale] Step 3: Pipeline ready');
 
-            // Render current edits
             this._render();
             const srcCanvas = document.getElementById('main-canvas');
 
-            // Downsize source if too large for the model (max ~1000px per side)
+            // Downsize for model (max ~800px per side)
             const maxModelInput = 800;
             let inputCanvas = srcCanvas;
             if (srcCanvas.width > maxModelInput || srcCanvas.height > maxModelInput) {
@@ -1479,22 +1478,23 @@ class App {
                 const ctx = inputCanvas.getContext('2d');
                 ctx.drawImage(srcCanvas, 0, 0, inputCanvas.width, inputCanvas.height);
             }
+            console.log('[AI Upscale] Step 4: Input prepared', inputCanvas.width, 'x', inputCanvas.height);
 
             btn.textContent = '⏳ Upscaling with AI (this takes a moment)...';
             await new Promise(r => setTimeout(r, 50));
 
-            // Convert to data URL (more reliable than blob URL for the model)
             const dataUrl = inputCanvas.toDataURL('image/png');
+            console.log('[AI Upscale] Step 5: Running model...');
 
-            // Run the 2× model
-            const result = await upscaler(dataUrl);
+            const result = await this._upscalePipeline(dataUrl);
+            console.log('[AI Upscale] Step 6: Model output:', typeof result, result);
+
             const img = Array.isArray(result) ? result[0] : result;
 
-            // Extract result to canvas
             let resultCanvas;
-            if (img.toCanvas) {
+            if (img && img.toCanvas) {
                 resultCanvas = img.toCanvas();
-            } else if (img.width && img.data) {
+            } else if (img && img.width && img.data) {
                 resultCanvas = document.createElement('canvas');
                 resultCanvas.width = img.width;
                 resultCanvas.height = img.height;
@@ -1509,10 +1509,12 @@ class App {
                 }
                 ctx.putImageData(id, 0, 0);
             } else {
-                throw new Error('Unexpected model output');
+                console.error('[AI Upscale] Unknown output:', img);
+                throw new Error('Unexpected model output format');
             }
+            console.log('[AI Upscale] Step 7: Result canvas', resultCanvas.width, 'x', resultCanvas.height);
 
-            // Scale to final target size
+            // Scale to final target
             const targetW = Math.round(this.imageWidth * scale);
             const targetH = Math.round(this.imageHeight * scale);
             const finalCanvas = document.createElement('canvas');
@@ -1523,11 +1525,13 @@ class App {
             fCtx.imageSmoothingQuality = 'high';
             fCtx.drawImage(resultCanvas, 0, 0, targetW, targetH);
 
+            console.log('[AI Upscale] Done! Output:', targetW, 'x', targetH);
             finalCanvas.toBlob(onBlob, mimeType, quality);
 
         } catch (e) {
-            console.error('AI upscale error:', e);
-            alert('AI upscaling failed: ' + e.message + '\nFalling back to bicubic.');
+            console.error('AI upscale full error:', e);
+            const msg = (e && e.message) ? e.message : String(e);
+            alert('AI upscaling failed: ' + msg + '\nFalling back to bicubic. Check browser console for details.');
             this._render();
             const srcCanvas = document.getElementById('main-canvas');
             const outW = Math.round(this.imageWidth * scale);
