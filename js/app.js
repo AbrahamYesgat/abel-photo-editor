@@ -78,25 +78,31 @@ class App {
         // Crop tool
         this.cropTool = new CropTool(this);
 
-        // Panel tab switching
+        // Panel tab switching (vertical tabs + old horizontal tabs for compatibility)
+        const switchPanel = (panel, clickedTab) => {
+            // Update vtabs
+            document.querySelectorAll('.vtab').forEach(t => t.classList.remove('active'));
+            // Update panel-tabs (mobile compat)
+            document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+            if (clickedTab) clickedTab.classList.add('active');
+            // Also mark matching vtab/panel-tab
+            document.querySelectorAll(`.vtab[data-panel="${panel}"], .panel-tab[data-panel="${panel}"]`).forEach(t => t.classList.add('active'));
+
+            document.querySelectorAll('.edit-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`panel-${panel}`).classList.add('active');
+            if (panel !== 'masks') this._exitMaskMode();
+            if (panel === 'crop') {
+                this.cropTool.activate();
+            } else if (this.cropTool && this.cropTool.active) {
+                this.cropTool.deactivate();
+            }
+        };
+
+        document.querySelectorAll('.vtab').forEach(tab => {
+            tab.addEventListener('click', () => switchPanel(tab.dataset.panel, tab));
+        });
         document.querySelectorAll('.panel-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const panel = tab.dataset.panel;
-                document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                document.querySelectorAll('.edit-panel').forEach(p => p.classList.remove('active'));
-                document.getElementById(`panel-${panel}`).classList.add('active');
-                // Exit mask mode when switching away from masks panel
-                if (panel !== 'masks') {
-                    this._exitMaskMode();
-                }
-                // Activate/deactivate crop tool
-                if (panel === 'crop') {
-                    this.cropTool.activate();
-                } else if (this.cropTool && this.cropTool.active) {
-                    this.cropTool.deactivate();
-                }
-            });
+            tab.addEventListener('click', () => switchPanel(tab.dataset.panel, tab));
         });
 
         // Mobile tab bar
@@ -105,10 +111,7 @@ class App {
                 const panel = tab.dataset.panel;
                 document.querySelectorAll('.mobile-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
-                document.querySelectorAll('.panel-tab').forEach(t => {
-                    if (t.dataset.panel === panel) t.click();
-                });
-                // Show right sidebar on mobile
+                switchPanel(panel, null);
                 document.querySelector('.sidebar-right').classList.add('mobile-open');
             });
         });

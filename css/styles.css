@@ -203,8 +203,8 @@ html, body {
 }
 
 .sidebar-left.collapsed {
-    width: 32px;
-    min-width: 32px;
+    width: 28px;
+    min-width: 28px;
     overflow: hidden;
 }
 
@@ -214,16 +214,14 @@ html, body {
 
 .sidebar-left-toggle {
     position: absolute;
-    top: 8px;
-    right: 6px;
-    width: 22px;
-    height: 22px;
-    background: var(--bg-panel-alt);
-    border: 1px solid var(--border);
-    border-radius: 50%;
+    top: 0;
+    left: 0;
+    width: 28px;
+    height: 100%;
+    background: none;
+    border: none;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -238,9 +236,30 @@ html, body {
     background: var(--bg-hover);
 }
 
-.sidebar-left.collapsed .sidebar-left-toggle {
-    right: 5px;
-    transform: rotate(180deg);
+.sidebar-left:not(.collapsed) .sidebar-left-toggle {
+    width: 20px;
+    right: 4px;
+    left: auto;
+    height: 20px;
+    top: 8px;
+    border-radius: 50%;
+}
+
+.toggle-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    writing-mode: vertical-lr;
+    text-orientation: mixed;
+}
+
+.sidebar-left:not(.collapsed) .toggle-label {
+    display: none;
+}
+
+.sidebar-left:not(.collapsed) .sidebar-left-toggle::after {
+    content: '‹';
+    font-size: 14px;
 }
 
 .canvas-area {
@@ -261,6 +280,74 @@ html, body {
     flex-direction: column;
     flex-shrink: 0;
     overflow: hidden;
+}
+
+.sidebar-right-inner {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ===================== Vertical Tabs ===================== */
+.vtabs {
+    display: flex;
+    flex-direction: column;
+    width: 36px;
+    flex-shrink: 0;
+    background: var(--bg-panel-alt);
+    border-right: 1px solid var(--border);
+    padding: 4px 0;
+    gap: 2px;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.vtabs::-webkit-scrollbar { display: none; }
+
+.vtab {
+    width: 36px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all var(--transition);
+    border-radius: 0;
+    position: relative;
+    font-family: var(--font);
+}
+
+.vtab:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.vtab.active {
+    color: var(--text-bright);
+    background: var(--bg-panel);
+}
+
+.vtab.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+}
+
+.vpanel-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
 }
 
 /* ===================== Resize Handle ===================== */
@@ -409,53 +496,8 @@ html, body {
     background: var(--bg-input);
 }
 
-/* ===================== Panel Tabs ===================== */
-.panel-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-panel-alt);
-    flex-shrink: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-}
-
-.panel-tabs::-webkit-scrollbar { display: none; }
-
-.panel-tab {
-    flex: 1;
-    padding: 9px 2px;
-    border: none;
-    background: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 9.5px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    transition: color var(--transition);
-    text-align: center;
-    min-width: 0;
-    white-space: nowrap;
-    font-family: var(--font);
-    position: relative;
-}
-
-.panel-tab:hover { color: var(--text-secondary); }
-
-.panel-tab.active {
-    color: var(--text-primary);
-}
-
-.panel-tab.active::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 20%;
-    right: 20%;
-    height: 2px;
-    background: var(--accent);
-    border-radius: 1px;
-}
+/* ===================== Panel Tabs (horizontal - hidden, replaced by vtabs) ===================== */
+.panel-tabs { display: none; }
 
 /* ===================== Panels ===================== */
 .panels-container {

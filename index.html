@@ -77,13 +77,15 @@
 <!-- ==================== Main Layout ==================== -->
 <main class="editor-layout">
 
-    <!-- Left Sidebar: Presets (collapsible) -->
-    <aside class="sidebar-left" id="sidebar-left">
+    <!-- Left Sidebar: Presets (collapsed by default, vertical label) -->
+    <aside class="sidebar-left collapsed" id="sidebar-left">
         <div class="presets-panel">
             <h3>Presets</h3>
             <div id="presets-list" class="presets-grid"></div>
         </div>
-        <button class="sidebar-left-toggle" id="toggle-presets" title="Toggle presets panel">‹</button>
+        <button class="sidebar-left-toggle" id="toggle-presets" title="Toggle presets panel">
+            <span class="toggle-label">PRESETS</span>
+        </button>
     </aside>
 
     <!-- Canvas Area -->
@@ -123,33 +125,36 @@
         </div>
     </section>
 
-    <!-- Right Sidebar: Edit Panels -->
+    <!-- Right Sidebar: Edit Panels (vertical tabs) -->
     <div class="resize-handle" id="resize-handle"></div>
     <aside class="sidebar-right" id="sidebar-right">
         <button class="sidebar-close" id="close-sidebar">✕</button>
 
-        <!-- Histogram (collapsible, compact) -->
-        <details class="histogram-section" open>
-            <summary class="histogram-toggle">Histogram</summary>
-            <div class="histogram-container">
-                <canvas id="histogram-canvas"></canvas>
+        <div class="sidebar-right-inner">
+            <!-- Vertical Tab Icons -->
+            <div class="vtabs">
+                <button class="vtab" data-panel="crop" title="Crop">✂</button>
+                <button class="vtab active" data-panel="basic" title="Basic">☀</button>
+                <button class="vtab" data-panel="curve" title="Curve">〰</button>
+                <button class="vtab" data-panel="hsl" title="HSL">🎨</button>
+                <button class="vtab" data-panel="color" title="Color">◐</button>
+                <button class="vtab" data-panel="detail" title="Detail">▲</button>
+                <button class="vtab" data-panel="effects" title="Effects">✦</button>
+                <button class="vtab" data-panel="masks" title="Masks">◑</button>
             </div>
-        </details>
 
-        <!-- Panel Tabs -->
-        <div class="panel-tabs">
-            <button class="panel-tab" data-panel="crop">Crop</button>
-            <button class="panel-tab active" data-panel="basic">Basic</button>
-            <button class="panel-tab" data-panel="curve">Curve</button>
-            <button class="panel-tab" data-panel="hsl">HSL</button>
-            <button class="panel-tab" data-panel="color">Color</button>
-            <button class="panel-tab" data-panel="detail">Detail</button>
-            <button class="panel-tab" data-panel="effects">Effects</button>
-            <button class="panel-tab" data-panel="masks">Masks</button>
-        </div>
+            <!-- Panel Content Area -->
+            <div class="vpanel-area">
+                <!-- Histogram (collapsible, compact) -->
+                <details class="histogram-section" open>
+                    <summary class="histogram-toggle">Histogram</summary>
+                    <div class="histogram-container">
+                        <canvas id="histogram-canvas"></canvas>
+                    </div>
+                </details>
 
-        <!-- Panel Contents -->
-        <div class="panels-container">
+                <!-- Panel Contents -->
+                <div class="panels-container">
             <div class="edit-panel" id="panel-crop">
                 <div class="panel-section-header">Aspect Ratio</div>
                 <div id="crop-ratios" class="crop-ratios"></div>
@@ -173,6 +178,8 @@
             <div class="edit-panel" id="panel-detail"></div>
             <div class="edit-panel" id="panel-effects"></div>
             <div class="edit-panel" id="panel-masks"></div>
+                </div>
+            </div>
         </div>
     </aside>
 
