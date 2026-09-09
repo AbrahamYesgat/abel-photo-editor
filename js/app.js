@@ -873,26 +873,27 @@ class App {
         const iw = this.imageWidth;
         const ih = this.imageHeight;
 
-        let cw = container.clientWidth - 24;
-        let ch = container.clientHeight - 16;
-
-        // On mobile, reduce available height when bottom sheet is open
-        if (window.innerWidth <= 700) {
-            const sidebar = document.querySelector('.sidebar-right');
-            if (sidebar && sidebar.classList.contains('mobile-open')) {
-                // Sheet is open — photo gets less space
-                ch = Math.min(ch, window.innerHeight * 0.42);
-            } else {
-                // Sheet closed — leave room for tab bar
-                ch = container.clientHeight - 8;
-            }
-        }
+        // Available space
+        let cw = container.clientWidth;
+        let ch = container.clientHeight;
 
         if (!cw || !ch || !iw || !ih) return;
 
-        const scale = Math.min(cw / iw, ch / ih);
-        canvas.style.width = Math.round(iw * scale) + 'px';
-        canvas.style.height = Math.round(ih * scale) + 'px';
+        // Padding
+        cw -= 16;
+        ch -= 16;
+
+        const scale = Math.min(cw / iw, ch / ih, 1);
+        const w = Math.round(iw * scale);
+        const h = Math.round(ih * scale);
+
+        // Set display size — flexbox on container handles centering
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        canvas.style.minWidth = w + 'px';
+        canvas.style.minHeight = h + 'px';
+        canvas.style.maxWidth = w + 'px';
+        canvas.style.maxHeight = h + 'px';
     }
 
     _initResizeHandle() {
