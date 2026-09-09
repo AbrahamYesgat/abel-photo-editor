@@ -30,8 +30,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
-    height: 100dvh;
-    height: 100vh; /* fallback for older browsers */
+    height: 100%;
     overflow: hidden;
     font-family: var(--font);
     font-size: 11px;
@@ -187,7 +186,7 @@ html, body {
 /* ===================== Layout ===================== */
 .editor-layout {
     display: flex;
-    height: calc(100dvh - var(--toolbar-height)); height: calc(100vh - var(--toolbar-height));
+    height: calc(100vh - var(--toolbar-height));
     overflow: hidden;
 }
 
@@ -1067,11 +1066,12 @@ html, body {
         background: var(--bg-panel);
         border-top: 1px solid var(--border);
         z-index: 150;
-        height: 46px;
+        height: calc(46px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
     .editor-layout {
-        padding-bottom: 46px;
+        padding-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
     }
 }
 
@@ -1111,7 +1111,11 @@ html, body {
 }
 
 @media (max-width: 700px) {
-    .toolbar { padding: 0 6px; height: 42px; }
+    .toolbar { 
+        padding: 0 6px; 
+        height: 42px;
+        padding-top: env(safe-area-inset-top, 0);
+    }
     .toolbar button { padding: 5px 6px; font-size: 10px; }
     .toolbar button svg { width: 12px; height: 12px; }
     .logo { font-size: 11px; margin-right: 6px; letter-spacing: 1px; }
@@ -1125,20 +1129,32 @@ html, body {
     #btn-library { font-size: 0; }
     #btn-library svg { width: 16px; height: 16px; }
 
-    .editor-layout { flex-direction: column; height: calc(100dvh - 42px); }
+    html, body {
+        height: 100%;
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+    }
+
+    .editor-layout { 
+        flex-direction: column; 
+        height: calc(100% - 42px - env(safe-area-inset-top, 0px));
+        overflow: hidden;
+    }
+
     .sidebar-left { display: none; }
     .resize-handle { display: none; }
 
     .sidebar-right {
         position: fixed;
-        bottom: 46px; /* above mobile tab bar */
+        bottom: calc(46px + env(safe-area-inset-bottom, 0px));
         left: 0;
         right: 0;
         top: auto;
         width: 100%;
         max-width: none;
-        height: 45vh;
-        max-height: 320px;
+        height: 40vh;
+        max-height: 280px;
         z-index: 190;
         transform: translateY(100%);
         transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1160,14 +1176,12 @@ html, body {
         right: 12px;
     }
 
-    /* Hide histogram on mobile bottom sheet to save space */
     .histogram-section { display: none; }
 
-    /* On mobile, hide vtabs and use bottom tabs instead */
     .vtabs { display: none; }
     .vpanel-area { width: 100%; }
 
-    .canvas-area { flex: 1; min-height: 0; }
+    .canvas-area { flex: 1; min-height: 0; overflow: hidden; }
 
     #btn-before-after { display: none; }
 
