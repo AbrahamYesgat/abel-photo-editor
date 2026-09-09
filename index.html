@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ABEL — Photo Editor</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L3 22h18L12 2z' fill='%236366f1'/><path d='M12 8l-4.5 10h9L12 8z' fill='%23818cf8'/></svg>">
+</head>
+<body>
+
+<!-- ==================== Toolbar ==================== -->
+<header class="toolbar">
+    <div class="toolbar-left">
+        <span class="logo">
+            <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L3 22h18L12 2z" fill="url(#logoGrad)" opacity="0.9"/>
+                <path d="M12 8l-4.5 10h9L12 8z" fill="url(#logoGrad2)"/>
+                <defs>
+                    <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#6366f1"/>
+                        <stop offset="100%" stop-color="#0d99ff"/>
+                    </linearGradient>
+                    <linearGradient id="logoGrad2" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#818cf8"/>
+                        <stop offset="100%" stop-color="#38bdf8"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+            ABEL
+        </span>
+        <button id="btn-import" title="Import photo">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import
+        </button>
+        <input type="file" id="file-input" accept="image/*" hidden>
+        <button id="btn-library" title="Photo Library">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            Library
+        </button>
+    </div>
+    <div class="toolbar-center">
+        <button id="btn-undo" disabled title="Undo (Ctrl+Z)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+        </button>
+        <button id="btn-redo" disabled title="Redo (Ctrl+Y)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.13-9.36L23 10"/></svg>
+        </button>
+        <span class="separator"></span>
+        <button id="btn-before-after" title="Hold to see original (\)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+            Compare
+        </button>
+        <button id="btn-auto" title="Auto enhance">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
+            Auto
+        </button>
+        <button id="btn-reset" title="Reset all adjustments">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="17" x2="12" y2="17"/></svg>
+            Reset
+        </button>
+    </div>
+    <div class="toolbar-right">
+        <button id="btn-batch" title="Batch auto-edit multiple photos">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="16" height="14" rx="2"/><path d="M6 3h16a2 2 0 012 2v12"/></svg>
+            Batch
+        </button>
+        <button id="btn-export" title="Export (Ctrl+E)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export
+        </button>
+    </div>
+</header>
+
+<!-- ==================== Main Layout ==================== -->
+<main class="editor-layout">
+
+    <!-- Left Sidebar: Presets (collapsible) -->
+    <aside class="sidebar-left" id="sidebar-left">
+        <div class="presets-panel">
+            <h3>Presets</h3>
+            <div id="presets-list" class="presets-grid"></div>
+        </div>
+        <button class="sidebar-left-toggle" id="toggle-presets" title="Toggle presets panel">‹</button>
+    </aside>
+
+    <!-- Canvas Area -->
+    <section class="canvas-area">
+        <div class="canvas-container" id="canvas-container">
+            <canvas id="main-canvas"></canvas>
+            <canvas id="mask-overlay" style="display:none;"></canvas>
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone-content">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                    <h2>Drop your photo here</h2>
+                    <p>or click <strong>Import</strong> to get started</p>
+                    <p style="margin-top:8px;color:var(--text-muted)">Supports JPEG, PNG, WebP, HEIC, TIFF</p>
+                </div>
+            </div>
+        </div>
+        <div id="library-view" class="library-view" style="display:none;">
+            <div class="library-header">
+                <h2>Library</h2>
+                <div class="library-actions">
+                    <button class="btn btn-accent" id="lib-import-btn">Open Folder</button>
+                    <input type="file" id="lib-file-input" accept="image/*" multiple hidden>
+                    <button class="btn btn-outline" id="lib-refresh-btn" title="Re-scan folder">↻ Refresh</button>
+                    <button class="btn btn-outline" id="lib-clear-btn">Clear</button>
+                </div>
+            </div>
+            <div id="lib-folder-path" class="lib-folder-path" style="display:none;"></div>
+            <div id="library-grid" class="library-grid"></div>
+        </div>
+        <div id="filmstrip" class="filmstrip" style="display:none;">
+            <div id="filmstrip-inner" class="filmstrip-inner"></div>
+        </div>
+    </section>
+
+    <!-- Right Sidebar: Edit Panels -->
+    <div class="resize-handle" id="resize-handle"></div>
+    <aside class="sidebar-right" id="sidebar-right">
+        <button class="sidebar-close" id="close-sidebar">✕</button>
+
+        <!-- Histogram (collapsible, compact) -->
+        <details class="histogram-section" open>
+            <summary class="histogram-toggle">Histogram</summary>
+            <div class="histogram-container">
+                <canvas id="histogram-canvas"></canvas>
+            </div>
+        </details>
+
+        <!-- Panel Tabs -->
+        <div class="panel-tabs">
+            <button class="panel-tab active" data-panel="basic">Basic</button>
+            <button class="panel-tab" data-panel="curve">Curve</button>
+            <button class="panel-tab" data-panel="hsl">HSL</button>
+            <button class="panel-tab" data-panel="color">Color</button>
+            <button class="panel-tab" data-panel="detail">Detail</button>
+            <button class="panel-tab" data-panel="effects">Effects</button>
+            <button class="panel-tab" data-panel="masks">Masks</button>
+        </div>
+
+        <!-- Panel Contents -->
+        <div class="panels-container">
+            <div class="edit-panel active" id="panel-basic"></div>
+            <div class="edit-panel" id="panel-curve">
+                <div id="curve-container" class="curve-container"></div>
+                <p class="panel-info">Click to add points. Drag to adjust. Double-click to remove.</p>
+            </div>
+            <div class="edit-panel" id="panel-hsl"></div>
+            <div class="edit-panel" id="panel-color"></div>
+            <div class="edit-panel" id="panel-detail"></div>
+            <div class="edit-panel" id="panel-effects"></div>
+            <div class="edit-panel" id="panel-masks"></div>
+        </div>
+    </aside>
+
+</main>
+
+<!-- Mobile Bottom Tabs -->
+<nav class="mobile-tabs">
+    <div class="mobile-tabs-inner">
+        <button class="mobile-tab active" data-panel="basic">Basic</button>
+        <button class="mobile-tab" data-panel="curve">Curve</button>
+        <button class="mobile-tab" data-panel="hsl">HSL</button>
+        <button class="mobile-tab" data-panel="color">Color</button>
+        <button class="mobile-tab" data-panel="detail">Detail</button>
+        <button class="mobile-tab" data-panel="effects">Effects</button>
+        <button class="mobile-tab" data-panel="masks">Masks</button>
+    </div>
+</nav>
+
+<!-- Export Modal -->
+<div class="modal-overlay" id="export-modal">
+    <div class="modal">
+        <h3>Export Photo</h3>
+        <div class="modal-row">
+            <label for="export-format">Format</label>
+            <select id="export-format">
+                <option value="jpeg" selected>JPEG</option>
+                <option value="png">PNG</option>
+                <option value="webp">WebP</option>
+                <option value="tiff-png">TIFF-quality PNG</option>
+            </select>
+        </div>
+        <div class="modal-row" id="quality-row">
+            <label for="export-quality">Quality</label>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <input type="range" id="export-quality" min="10" max="100" value="92" class="slider-input" style="width:120px;">
+                <span id="quality-value" style="font-size:11px;min-width:30px;color:var(--text-primary)">92%</span>
+            </div>
+        </div>
+
+        <div style="height:1px;background:var(--border);margin:14px 0;"></div>
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary);margin-bottom:10px;">Resolution / Print</div>
+
+        <div class="modal-row">
+            <label for="export-scale">Upscale</label>
+            <select id="export-scale">
+                <option value="1" selected>1× (Original)</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+                <option value="3">3×</option>
+                <option value="4">4×</option>
+            </select>
+        </div>
+
+        <div class="modal-row">
+            <label>Output size</label>
+            <span id="export-dimensions" style="font-size:11px;color:var(--text-primary);font-variant-numeric:tabular-nums;">— × —</span>
+        </div>
+
+        <div style="height:1px;background:var(--border);margin:14px 0;"></div>
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary);margin-bottom:10px;">Print Size Calculator</div>
+
+        <div class="modal-row">
+            <label for="export-dpi">DPI</label>
+            <select id="export-dpi">
+                <option value="72">72 (Screen)</option>
+                <option value="150">150 (Draft)</option>
+                <option value="300" selected>300 (Print)</option>
+                <option value="600">600 (Fine art)</option>
+            </select>
+        </div>
+
+        <div class="modal-row">
+            <label>Print size</label>
+            <span id="export-print-size" style="font-size:11px;color:var(--text-primary);font-variant-numeric:tabular-nums;">— × — in</span>
+        </div>
+
+        <div class="modal-row">
+            <label>Target print</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+                <input type="number" id="target-width" placeholder="W" min="1" max="100" step="0.1" style="width:52px;padding:4px 6px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:11px;font-family:var(--font);">
+                <span style="color:var(--text-muted)">×</span>
+                <input type="number" id="target-height" placeholder="H" min="1" max="100" step="0.1" style="width:52px;padding:4px 6px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:11px;font-family:var(--font);">
+                <span style="color:var(--text-muted);font-size:10px;">in</span>
+                <button class="btn btn-sm btn-outline" id="calc-scale-btn" style="margin-left:4px;">Calc</button>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-outline" id="export-cancel">Cancel</button>
+            <button class="btn btn-accent" id="export-confirm">Download</button>
+        </div>
+    </div>
+</div>
+
+<!-- Batch Auto-Edit Modal -->
+<div class="modal-overlay" id="batch-modal">
+    <div class="modal modal-wide">
+        <div class="modal-header-row">
+            <h3>Batch Auto-Edit</h3>
+            <button class="btn btn-sm" id="batch-close">✕</button>
+        </div>
+        <p class="batch-desc">Select multiple photos to auto-enhance and download as a ZIP.</p>
+
+        <div class="batch-import-area" id="batch-drop">
+            <input type="file" id="batch-file-input" accept="image/*" multiple hidden>
+            <button class="btn btn-accent" id="batch-select-btn">Select Photos</button>
+            <span class="batch-hint">or drag & drop</span>
+        </div>
+
+        <div class="batch-options">
+            <div class="modal-row">
+                <label>Format</label>
+                <select id="batch-format">
+                    <option value="jpeg" selected>JPEG</option>
+                    <option value="png">PNG</option>
+                    <option value="webp">WebP</option>
+                </select>
+            </div>
+            <div class="modal-row" id="batch-quality-row">
+                <label>Quality</label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <input type="range" id="batch-quality" min="10" max="100" value="90" class="slider-input" style="width:100px;">
+                    <span id="batch-quality-value" style="font-size:11px;color:var(--text-primary)">90%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="batch-list-container">
+            <div id="batch-list" class="batch-list"></div>
+        </div>
+
+        <div class="batch-progress-bar" id="batch-progress-wrap" style="display:none;">
+            <div class="batch-progress-fill" id="batch-progress-fill"></div>
+        </div>
+
+        <div class="batch-status" id="batch-status"></div>
+
+        <div class="modal-actions">
+            <button class="btn btn-outline" id="batch-cancel">Cancel</button>
+            <button class="btn btn-accent" id="batch-start" disabled>Process All</button>
+            <button class="btn btn-accent" id="batch-download" style="display:none;">Download ZIP</button>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="js/shaders.js"></script>
+<script src="js/gl-engine.js"></script>
+<script src="js/histogram.js"></script>
+<script src="js/curve-editor.js"></script>
+<script src="js/mask-engine.js"></script>
+<script src="js/auto-edit.js"></script>
+<script src="js/presets.js"></script>
+<script src="js/app.js"></script>
+
+<script>
+    document.getElementById('export-quality').addEventListener('input', function() {
+        document.getElementById('quality-value').textContent = this.value + '%';
+    });
+</script>
+
+</body>
+</html>
