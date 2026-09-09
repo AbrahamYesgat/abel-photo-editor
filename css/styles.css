@@ -1051,41 +1051,11 @@ html, body {
     font-family: var(--font);
 }
 
-/* ===================== Mobile Tabs ===================== */
-.mobile-tabs {
-    display: none;
-}
 
-@media (max-width: 700px) {
-    .mobile-tabs {
-        display: block !important;
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: var(--bg-panel);
-        border-top: 1px solid var(--border);
-        z-index: 150;
-        height: calc(46px + env(safe-area-inset-bottom, 0px));
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-    }
+/* ===================== Mobile Layout (Lightroom-style) ===================== */
 
-    .editor-layout {
-        padding-bottom: calc(46px + env(safe-area-inset-bottom, 0px));
-    }
-}
-
-.mobile-tabs-inner {
-    display: flex;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    height: 100%;
-    align-items: center;
-}
-
-.mobile-tabs-inner::-webkit-scrollbar { display: none; }
-
+/* Hidden by default on desktop */
+.mobile-tabs { display: none; }
 .mobile-tab {
     flex: 0 0 auto;
     padding: 10px 14px;
@@ -1098,133 +1068,229 @@ html, body {
     text-transform: uppercase;
     letter-spacing: 0.3px;
     white-space: nowrap;
-    transition: color var(--transition);
     font-family: var(--font);
 }
+.mobile-tab.active { color: var(--text-bright); }
 
-.mobile-tab:hover, .mobile-tab.active { color: var(--text-primary); }
-
-/* ===================== Responsive ===================== */
+/* Tablet: hide presets sidebar */
 @media (max-width: 900px) {
     .sidebar-left { display: none; }
     .sidebar-right { width: 280px; }
 }
 
+/* ==================== PHONE LAYOUT ==================== */
 @media (max-width: 700px) {
-    .toolbar { 
-        padding: 0 6px; 
-        height: 42px;
-        padding-top: env(safe-area-inset-top, 0);
-    }
-    .toolbar button { padding: 5px 6px; font-size: 10px; }
-    .toolbar button svg { width: 12px; height: 12px; }
-    .logo { font-size: 11px; margin-right: 6px; letter-spacing: 1px; }
-    .logo-icon { display: none; }
-    .separator { display: none; }
 
-    /* Hide text labels on toolbar buttons, keep icons */
-    #btn-undo, #btn-redo { font-size: 0; }
-    #btn-undo svg, #btn-redo svg { width: 16px; height: 16px; }
-    #btn-batch { display: none; }
-    #btn-library { font-size: 0; }
-    #btn-library svg { width: 16px; height: 16px; }
-
+    /* --- Lock viewport --- */
     html, body {
+        position: fixed;
+        width: 100%;
         height: 100%;
         overflow: hidden;
-        position: fixed;
-        width: 100%;
     }
 
-    .editor-layout { 
-        flex-direction: column; 
-        height: calc(100% - 42px - env(safe-area-inset-top, 0px));
+    /* --- Toolbar: compact, safe area aware --- */
+    .toolbar {
+        padding: 0 8px;
+        padding-top: env(safe-area-inset-top, 0);
+        height: calc(40px + env(safe-area-inset-top, 0px));
+        min-height: 40px;
+    }
+    .toolbar button { padding: 6px 6px; font-size: 0; gap: 0; }
+    .toolbar button svg { width: 18px; height: 18px; }
+    .logo { font-size: 12px; margin-right: auto; letter-spacing: 1.5px; }
+    .logo-icon { display: none; }
+    .separator { display: none; }
+    #btn-auto { font-size: 10px; }
+    #btn-export { font-size: 10px; }
+    #btn-batch { display: none; }
+    #btn-before-after { display: none; }
+    #btn-reset { display: none; }
+
+    /* --- Main layout: vertical stack --- */
+    .editor-layout {
+        flex-direction: column;
+        height: calc(100% - 40px - env(safe-area-inset-top, 0px));
         overflow: hidden;
     }
 
-    .sidebar-left { display: none; }
-    .resize-handle { display: none; }
+    /* --- Hide desktop panels --- */
+    .sidebar-left { display: none !important; }
+    .resize-handle { display: none !important; }
 
-    .sidebar-right {
+    /* --- Canvas area: top portion --- */
+    .canvas-area {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    #main-canvas {
+        max-width: calc(100% - 16px) !important;
+        max-height: calc(100% - 8px) !important;
+    }
+
+    /* --- Bottom control area: Lightroom-style --- */
+    /* Tab strip at bottom, edit panel above it */
+
+    .mobile-tabs {
+        display: block !important;
         position: fixed;
-        bottom: calc(46px + env(safe-area-inset-bottom, 0px));
+        bottom: 0;
         left: 0;
         right: 0;
-        top: auto;
-        width: 100%;
-        max-width: none;
-        height: 40vh;
-        max-height: 280px;
-        z-index: 190;
-        transform: translateY(100%);
-        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+        background: var(--bg-panel);
         border-top: 1px solid var(--border);
-        border-radius: 12px 12px 0 0;
-        overflow: hidden;
+        z-index: 195;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
-    .sidebar-right .sidebar-right-inner { flex-direction: column; }
+    .mobile-tabs-inner {
+        display: flex;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        height: 42px;
+        align-items: center;
+        padding: 0 4px;
+    }
+
+    .mobile-tabs-inner::-webkit-scrollbar { display: none; }
+
+    .mobile-tab {
+        padding: 8px 12px;
+        font-size: 10px;
+    }
+
+    .mobile-tab.active {
+        color: var(--accent);
+        position: relative;
+    }
+
+    .mobile-tab.active::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 25%;
+        right: 25%;
+        height: 2px;
+        background: var(--accent);
+        border-radius: 1px;
+    }
+
+    /* --- Edit panel: slides up from bottom, above tab strip --- */
+    .sidebar-right {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+        top: auto;
+        width: 100% !important;
+        max-width: none !important;
+        height: 50vh;
+        max-height: 350px;
+        z-index: 190;
+        transform: translateY(100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-top: 1px solid var(--border);
+        border-radius: 14px 14px 0 0;
+        overflow: hidden;
+        box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+    }
 
     .sidebar-right.mobile-open {
         transform: translateY(0);
     }
 
-    .sidebar-close {
-        display: flex;
-        top: 6px;
-        right: 12px;
+    .sidebar-right .sidebar-right-inner {
+        flex-direction: column;
+        height: 100%;
     }
 
-    .histogram-section { display: none; }
+    /* Hide vertical tabs on mobile */
+    .vtabs { display: none !important; }
+    .vpanel-area { width: 100%; height: 100%; }
 
-    .vtabs { display: none; }
-    .vpanel-area { width: 100%; }
+    /* Drag handle at top of bottom sheet */
+    .sidebar-right::before {
+        content: '';
+        display: block;
+        width: 36px;
+        height: 4px;
+        background: var(--text-muted);
+        border-radius: 2px;
+        margin: 8px auto 4px;
+        opacity: 0.5;
+    }
 
-    .canvas-area { flex: 1; min-height: 0; overflow: hidden; }
+    .sidebar-close { display: none !important; }
 
-    #btn-before-after { display: none; }
+    /* Hide histogram on mobile */
+    .histogram-section { display: none !important; }
 
-    /* Histogram smaller on mobile */
-    #histogram-canvas { height: 40px; }
+    /* Panels container scrolls */
+    .panels-container {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 12px;
+    }
 
-    /* Filmstrip shorter */
-    .filmstrip { height: 52px; }
-    .filmstrip-thumb { width: 40px; height: 40px; }
+    .edit-panel { padding: 8px 16px; }
 
-    /* Modal full width on mobile */
-    .modal { width: 95vw; max-width: none; padding: 16px; }
-    .modal-wide { width: 95vw; }
+    /* Slider touch targets bigger */
+    .slider-input { height: 6px; }
+    .slider-input::-webkit-slider-thumb { width: 20px; height: 20px; }
+    .slider-input::-moz-range-thumb { width: 20px; height: 20px; }
+    .slider-row { margin-bottom: 12px; }
+    .slider-header { margin-bottom: 5px; }
+    .slider-label { font-size: 12px; }
+    .slider-value { font-size: 11px; }
 
-    /* Crop ratios wrap better */
-    .crop-ratio-btn { padding: 6px 8px; }
+    /* Drop zone */
+    .drop-zone-content { padding: 40px 30px; }
+    .drop-zone-content h2 { font-size: 16px; }
+    .drop-zone-content svg { width: 40px; height: 40px; }
 
-    /* Library grid smaller thumbs */
-    .library-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 4px; }
+    /* Modals */
+    .modal { width: 92vw !important; max-width: none !important; padding: 16px; border-radius: 14px; }
+    .modal-wide { width: 92vw !important; }
+
+    /* Filmstrip */
+    .filmstrip { height: 56px; }
+    .filmstrip-thumb { width: 42px; height: 42px; }
+
+    /* Library grid */
+    .library-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 4px; }
+
+    /* Crop ratios */
+    .crop-ratios { gap: 6px; }
+    .crop-ratio-btn { padding: 8px 10px; font-size: 11px; }
+
+    /* Presets grid on mobile */
+    .presets-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .preset-card { padding: 10px 4px; }
+    .preset-icon { font-size: 20px; }
+    .preset-name { font-size: 10px; }
+
+    /* Mask tools */
+    .mask-tools { gap: 6px; }
+    .mask-tools .btn { padding: 8px 10px; font-size: 11px; }
+
+    /* Make canvas area account for fixed tab bar */
+    .editor-layout {
+        padding-bottom: calc(42px + env(safe-area-inset-bottom, 0px));
+    }
 }
 
 @media (max-width: 400px) {
-    .toolbar button { padding: 4px 4px; font-size: 9px; gap: 2px; }
-    .toolbar-left { gap: 1px; }
-    .toolbar-center { gap: 1px; }
-    .toolbar-right { gap: 1px; }
-    #btn-auto { font-size: 0; }
-    #btn-auto svg { width: 16px; height: 16px; }
-    #btn-reset { display: none; }
+    .toolbar button { padding: 5px 4px; }
+    .mobile-tab { padding: 8px 10px; font-size: 9px; }
+    .preset-card { padding: 8px 2px; }
 }
 
 /* ===================== Mobile Backdrop ===================== */
-.mobile-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 199;
-}
-
-@media (max-width: 700px) {
-    .mobile-backdrop.visible { display: none; }
-}
+.mobile-backdrop { display: none; }
 
 /* ===================== Animations ===================== */
 @keyframes fadeIn {
@@ -1245,7 +1311,7 @@ html, body {
     font-style: italic;
 }
 
-/* ===================== Library View ===================== */
+/* ===================== Library ===================== */
 .library-view {
     position: absolute;
     inset: 0;
@@ -1268,23 +1334,7 @@ html, body {
     color: var(--text-primary);
 }
 
-.library-actions {
-    display: flex;
-    gap: 8px;
-}
-
-.lib-folder-path {
-    font-size: 10px;
-    color: var(--text-muted);
-    padding: 4px 0 12px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.lib-folder-path::before {
-    content: '📁';
-}
+.library-actions { display: flex; gap: 8px; }
 
 .library-grid {
     display: grid;
@@ -1303,36 +1353,21 @@ html, body {
     transition: border-color var(--transition), transform var(--transition);
 }
 
-.lib-thumb:hover {
-    border-color: var(--accent);
-    transform: scale(1.02);
-}
-
-.lib-thumb.active {
-    border-color: var(--accent);
-}
-
-.lib-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
+.lib-thumb:hover { border-color: var(--accent); transform: scale(1.02); }
+.lib-thumb.active { border-color: var(--accent); }
+.lib-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
 .lib-thumb-edited {
     position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 8px;
-    height: 8px;
+    top: 6px; right: 6px;
+    width: 8px; height: 8px;
     background: var(--accent);
     border-radius: 50%;
 }
 
 .lib-thumb-name {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    bottom: 0; left: 0; right: 0;
     padding: 4px 6px;
     background: rgba(0,0,0,0.7);
     font-size: 9px;
@@ -1342,12 +1377,9 @@ html, body {
     text-overflow: ellipsis;
 }
 
-/* ===================== Filmstrip ===================== */
 .filmstrip {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    bottom: 0; left: 0; right: 0;
     height: 64px;
     background: rgba(0,0,0,0.85);
     backdrop-filter: blur(8px);
@@ -1369,8 +1401,7 @@ html, body {
 .filmstrip-inner::-webkit-scrollbar { display: none; }
 
 .filmstrip-thumb {
-    width: 48px;
-    height: 48px;
+    width: 48px; height: 48px;
     border-radius: 3px;
     object-fit: cover;
     cursor: pointer;
@@ -1380,55 +1411,16 @@ html, body {
     flex-shrink: 0;
 }
 
-.filmstrip-thumb:hover {
-    opacity: 1;
-}
+.filmstrip-thumb:hover { opacity: 1; }
+.filmstrip-thumb.active { border-color: var(--accent); opacity: 1; }
 
-.filmstrip-thumb.active {
-    border-color: var(--accent);
-    opacity: 1;
-}
-
-/* ==================== Crop Overlay ==================== */
-.crop-overlay {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    pointer-events: none;
-    z-index: 25;
-    display: none;
-}
-
-.crop-overlay.active {
-    display: block;
-    pointer-events: auto;
-}
-
-.crop-ratios {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 4px;
-}
-
-.crop-ratio-btn {
-    padding: 5px 10px;
+.lib-folder-path {
     font-size: 10px;
-    background: var(--bg-panel-alt);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-family: var(--font);
-    transition: all var(--transition);
-}
-
-.crop-ratio-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.crop-ratio-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-
-.crop-actions {
+    color: var(--text-muted);
+    padding: 4px 0 12px;
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 6px;
 }
 
-.crop-actions .btn { flex: 1; justify-content: center; }
+.lib-folder-path::before { content: '📁'; }
