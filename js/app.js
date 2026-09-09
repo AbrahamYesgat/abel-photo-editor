@@ -1480,39 +1480,72 @@ class App {
             }
             console.log('[AI Upscale] Step 4: Input prepared', inputCanvas.width, 'x', inputCanvas.height);
 
-            btn.textContent = '⏳ Upscaling with AI (this takes a moment)...';
+            btn.textContent = '⏳ Upscaling with AI (tile processing)...';
             await new Promise(r => setTimeout(r, 50));
 
-            const dataUrl = inputCanvas.toDataURL('image/png');
-            console.log('[AI Upscale] Step 5: Running model...');
+            // Process in tiles — model can only handle small patches
+            const tileSize = 128; // input tile size
+            const overlap = 8;    // overlap to avoid seam artifacts
+            const iw = inputCanvas.width;
+            const ih = inputCanvas.height;
+            const inputCtx = inputCanvas.getContext('2d');
 
-            const result = await this._upscalePipeline(dataUrl);
-            console.log('[AI Upscale] Step 6: Model output:', typeof result, result);
+            // Output canvas at 2× input size
+            const resultCanvas = document.createElement('canvas');
+            resultCanvas.width = iw * 2;
+            resultCanvas.height = ih * 2;
+            const outCtx = resultCanvas.getContext('2d');
 
-            const img = Array.isArray(result) ? result[0] : result;
+            const tilesX = Math.ceil(iw / (tileSize - overlap));
+            const tilesY = Math.ceil(ih / (tileSize - overlap));
+            const totalTiles = tilesX * tilesY;
+            let tilesDone = 0;
 
-            let resultCanvas;
-            if (img && img.toCanvas) {
-                resultCanvas = img.toCanvas();
-            } else if (img && img.width && img.data) {
-                resultCanvas = document.createElement('canvas');
-                resultCanvas.width = img.width;
-                resultCanvas.height = img.height;
-                const ctx = resultCanvas.getContext('2d');
-                const id = ctx.createImageData(img.width, img.height);
-                const ch = img.channels || 3;
-                for (let i = 0; i < img.width * img.height; i++) {
-                    for (let c = 0; c < Math.min(ch, 3); c++) {
-                        id.data[i * 4 + c] = img.data[i * ch + c];
+            console.log('[AI Upscale] Step 5: Processing', totalTiles, 'tiles at', tileSize + 'px');
+
+            for (let ty = 0; ty < tilesY; ty++) {
+                for (let tx = 0; tx < tilesX; tx++) {
+                    const sx = Math.min(tx * (tileSize - overlap), iw - tileSize);
+                    const sy = Math.min(ty * (tileSize - overlap), ih - tileSize);
+                    const tw = Math.min(tileSize, iw - sx);
+                    const th = Math.min(tileSize, ih - sy);
+
+                    // Extract tile
+                    const tileCanvas = document.createElement('canvas');
+                    tileCanvas.width = tw;
+                    tileCanvas.height = th;
+                    tileCanvas.getContext('2d').drawImage(inputCanvas, sx, sy, tw, th, 0, 0, tw, th);
+                    const tileUrl = tileCanvas.toDataURL('image/png');
+
+                    // Run model on tile
+                    const result = await this._upscalePipeline(tileUrl);
+                    const img = Array.isArray(result) ? result[0] : result;
+
+                    // Draw result tile to output (at 2× position)
+                    if (img && img.toCanvas) {
+                        outCtx.drawImage(img.toCanvas(), 0, 0, tw * 2, th * 2, sx * 2, sy * 2, tw * 2, th * 2);
+                    } else if (img && img.width && img.data) {
+                        const tc = document.createElement('canvas');
+                        tc.width = img.width;
+                        tc.height = img.height;
+                        const tctx = tc.getContext('2d');
+                        const id = tctx.createImageData(img.width, img.height);
+                        const ch = img.channels || 3;
+                        for (let i = 0; i < img.width * img.height; i++) {
+                            for (let c = 0; c < Math.min(ch, 3); c++) id.data[i*4+c] = img.data[i*ch+c];
+                            id.data[i*4+3] = 255;
+                        }
+                        tctx.putImageData(id, 0, 0);
+                        outCtx.drawImage(tc, 0, 0, tw * 2, th * 2, sx * 2, sy * 2, tw * 2, th * 2);
                     }
-                    id.data[i * 4 + 3] = 255;
+
+                    tilesDone++;
+                    btn.textContent = `⏳ AI Upscaling ${Math.round(tilesDone / totalTiles * 100)}%`;
+                    await new Promise(r => setTimeout(r, 10)); // Let UI update
                 }
-                ctx.putImageData(id, 0, 0);
-            } else {
-                console.error('[AI Upscale] Unknown output:', img);
-                throw new Error('Unexpected model output format');
             }
-            console.log('[AI Upscale] Step 7: Result canvas', resultCanvas.width, 'x', resultCanvas.height);
+
+            console.log('[AI Upscale] Step 6: All tiles done, result:', resultCanvas.width, 'x', resultCanvas.height);
 
             // Scale to final target
             const targetW = Math.round(this.imageWidth * scale);
