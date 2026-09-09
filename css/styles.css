@@ -1057,6 +1057,7 @@ html, body {
     background: var(--bg-panel);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+    z-index: 50;
 }
 
 .mobile-tabs-inner {
@@ -1121,16 +1122,17 @@ html, body {
         box-shadow: -4px 0 24px rgba(0, 0, 0, 0.6);
     }
 
+    .sidebar-right .sidebar-right-inner { flex-direction: column; }
+
     .sidebar-right.mobile-open { right: 0; }
     .sidebar-close { display: flex; }
 
     /* On mobile, hide vtabs and use bottom tabs instead */
     .vtabs { display: none; }
-    .sidebar-right-inner { flex-direction: column; }
     .vpanel-area { width: 100%; }
 
-    .mobile-tabs { display: block; }
-    .canvas-area { flex: 1; }
+    .mobile-tabs { display: flex; }
+    .canvas-area { flex: 1; min-height: 0; }
 
     #btn-before-after { display: none; }
 
