@@ -576,16 +576,18 @@ class App {
     }
 
     _buildPresets() {
-        const grid = document.getElementById('presets-list');
-        if (!grid) return;
-
-        PRESETS.forEach(preset => {
-            const card = document.createElement('div');
-            card.className = 'preset-card';
-            card.innerHTML = `<span class="preset-icon">${preset.icon}</span><span class="preset-name">${preset.name}</span>`;
-            card.addEventListener('click', () => this._applyPreset(preset));
-            grid.appendChild(card);
-        });
+        // Build presets for both desktop sidebar and mobile panel
+        const grids = [document.getElementById('presets-list'), document.getElementById('presets-list-mobile')];
+        for (const grid of grids) {
+            if (!grid) continue;
+            PRESETS.forEach(preset => {
+                const card = document.createElement('div');
+                card.className = 'preset-card';
+                card.innerHTML = `<span class="preset-icon">${preset.icon}</span><span class="preset-name">${preset.name}</span>`;
+                card.addEventListener('click', () => this._applyPreset(preset));
+                grid.appendChild(card);
+            });
+        }
     }
 
     _btn(text, onClick) {
@@ -613,6 +615,11 @@ class App {
         // Drag & drop
         const dropZone = document.getElementById('drop-zone');
         const container = document.getElementById('canvas-container');
+
+        // Tap drop zone to open file picker
+        dropZone.addEventListener('click', () => {
+            document.getElementById('file-input').click();
+        });
 
         ['dragenter', 'dragover'].forEach(evt => {
             container.addEventListener(evt, (e) => {

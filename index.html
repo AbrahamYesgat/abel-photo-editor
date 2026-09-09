@@ -98,14 +98,14 @@
             <canvas id="main-canvas"></canvas>
             <canvas id="mask-overlay" style="display:none;"></canvas>
             <canvas id="crop-overlay" class="crop-overlay"></canvas>
-            <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone" id="drop-zone" style="cursor:pointer;">
                 <div class="drop-zone-content">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                         <circle cx="8.5" cy="8.5" r="1.5"/>
                         <polyline points="21 15 16 10 5 21"/>
                     </svg>
-                    <h2>Drop your photo here</h2>
+                    <h2>Tap to open a photo</h2>
                     <p>or click <strong>Import</strong> to get started</p>
                     <p style="margin-top:8px;color:var(--text-muted)">Supports JPEG, PNG, WebP, HEIC, TIFF</p>
                 </div>
@@ -132,6 +132,7 @@
     <!-- Mobile Bottom Tabs (inside layout, right after canvas) -->
     <nav class="mobile-tabs">
         <div class="mobile-tabs-inner">
+            <button class="mobile-tab" data-panel="presets">Presets</button>
             <button class="mobile-tab" data-panel="crop">Crop</button>
             <button class="mobile-tab active" data-panel="basic">Basic</button>
             <button class="mobile-tab" data-panel="curve">Curve</button>
@@ -173,6 +174,9 @@
 
                 <!-- Panel Contents -->
                 <div class="panels-container">
+            <div class="edit-panel" id="panel-presets">
+                <div id="presets-list-mobile" class="presets-grid"></div>
+            </div>
             <div class="edit-panel" id="panel-crop">
                 <div class="panel-section-header">Aspect Ratio</div>
                 <div id="crop-ratios" class="crop-ratios"></div>
