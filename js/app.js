@@ -154,6 +154,17 @@ class App {
         input.addEventListener('input', () => {
             const v = parseFloat(input.value);
             val.textContent = this._formatVal(v, step);
+
+            // Haptic feedback when crossing zero or returning to default
+            if (input._lastVal !== undefined) {
+                const crossed = (input._lastVal < 0 && v >= 0) || (input._lastVal > 0 && v <= 0);
+                const hitDefault = (v == defaultVal && input._lastVal != defaultVal);
+                if ((crossed || hitDefault) && navigator.vibrate) {
+                    navigator.vibrate(10);
+                }
+            }
+            input._lastVal = v;
+
             this._onSliderChange(key, v, category);
         });
 
