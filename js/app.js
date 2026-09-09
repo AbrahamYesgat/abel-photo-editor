@@ -1817,7 +1817,7 @@ class CropTool {
     deactivate() {
         this.active = false;
         this.overlay.classList.remove('active');
-        document.getElementById('main-canvas').style.transform = '';
+        document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
     }
 
     setAspectRatio(ratio) {
@@ -1862,9 +1862,9 @@ class CropTool {
         // Apply CSS rotation to the main canvas for live preview
         const mainCanvas = document.getElementById('main-canvas');
         if (Math.abs(this.rotation) > 0.05) {
-            mainCanvas.style.transform = `rotate(${this.rotation}deg)`;
+            mainCanvas.style.transform = `translate(-50%, -50%) rotate(${this.rotation}deg)`;
         } else {
-            mainCanvas.style.transform = '';
+            mainCanvas.style.transform = 'translate(-50%, -50%)';
         }
 
         // Dark overlay outside crop
@@ -2127,7 +2127,7 @@ class CropTool {
         }
 
         // Clear CSS rotation preview
-        document.getElementById('main-canvas').style.transform = '';
+        document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
 
         // Replace the app's source image
         const newImg = new Image();
