@@ -227,11 +227,17 @@
             <label for="export-scale">Upscale</label>
             <select id="export-scale">
                 <option value="1" selected>1× (Original)</option>
-                <option value="1.5">1.5×</option>
-                <option value="2">2×</option>
-                <option value="3">3×</option>
-                <option value="4">4×</option>
+                <option value="1.5">1.5× Bicubic</option>
+                <option value="2">2× Bicubic</option>
+                <option value="3">3× Bicubic</option>
+                <option value="4">4× Bicubic</option>
+                <option value="ai2">2× AI Super-Resolution</option>
+                <option value="ai4">4× AI Super-Resolution</option>
             </select>
+        </div>
+
+        <div id="ai-upscale-note" style="display:none;font-size:10px;color:var(--accent);padding:0 0 8px;line-height:1.4;">
+            🧠 AI upscaling adds real detail. First use downloads a ~5MB model (cached). Processing takes 10-60s depending on image size.
         </div>
 
         <div class="modal-row">

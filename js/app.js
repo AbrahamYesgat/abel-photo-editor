@@ -1330,7 +1330,8 @@ class App {
             document.getElementById('export-print-size').textContent = '—';
             return;
         }
-        const scale = parseFloat(document.getElementById('export-scale').value) || 1;
+        const scaleVal = document.getElementById('export-scale').value;
+        const scale = scaleVal.startsWith('ai') ? parseInt(scaleVal.replace('ai', '')) : (parseFloat(scaleVal) || 1);
         const dpi = parseInt(document.getElementById('export-dpi').value) || 300;
         const w = Math.round(w0 * scale);
         const h = Math.round(h0 * scale);
@@ -1343,6 +1344,10 @@ class App {
         const cmH = (printH * 2.54).toFixed(1);
         document.getElementById('export-print-size').textContent =
             printW.toFixed(1) + ' × ' + printH.toFixed(1) + ' in  (' + cmW + ' × ' + cmH + ' cm)';
+
+        // Show/hide AI upscale note
+        const noteEl = document.getElementById('ai-upscale-note');
+        if (noteEl) noteEl.style.display = scaleVal.startsWith('ai') ? 'block' : 'none';
     }
 
     _calcScaleForPrint() {
@@ -1365,7 +1370,9 @@ class App {
         const scaleSelect = document.getElementById('export-scale');
         let bestIdx = scaleSelect.options.length - 1;
         for (let i = 0; i < scaleSelect.options.length; i++) {
-            if (parseFloat(scaleSelect.options[i].value) >= needed) {
+            const val = scaleSelect.options[i].value;
+            const num = val.startsWith('ai') ? parseInt(val.replace('ai', '')) : parseFloat(val);
+            if (num >= needed) {
                 bestIdx = i;
                 break;
             }
@@ -1395,7 +1402,7 @@ class App {
 
         const formatVal = document.getElementById('export-format').value;
         const quality = parseInt(document.getElementById('export-quality').value) / 100;
-        const scale = parseFloat(document.getElementById('export-scale').value);
+        const scaleVal = document.getElementById('export-scale').value;
 
         const format = formatVal === 'tiff-png' ? 'png' : formatVal;
         const mimeType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
@@ -1411,10 +1418,116 @@ class App {
             this._downloadBlob(blob, format);
         };
 
-        if (scale === 1) {
+        const isAI = scaleVal.startsWith('ai');
+        const scale = isAI ? parseInt(scaleVal.replace('ai', '')) : (parseFloat(scaleVal) || 1);
+
+        if (isAI) {
+            // AI super-resolution export
+            this._aiUpscaleExport(scale, mimeType, quality, onBlob, btn);
+        } else if (scale === 1) {
             this._render();
             document.getElementById('main-canvas').toBlob(onBlob, mimeType, quality);
         } else {
+            this._render();
+            const srcCanvas = document.getElementById('main-canvas');
+            const outW = Math.round(this.imageWidth * scale);
+            const outH = Math.round(this.imageHeight * scale);
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width = outW;
+            outCanvas.height = outH;
+            const ctx = outCanvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(srcCanvas, 0, 0, outW, outH);
+            outCanvas.toBlob(onBlob, mimeType, quality);
+        }
+    }
+
+    async _aiUpscaleExport(scale, mimeType, quality, onBlob, btn) {
+        try {
+            btn.textContent = '⏳ Loading AI model...';
+
+            // Load Transformers.js (reuse if already loaded)
+            if (!this._transformersPromise) {
+                this._transformersPromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
+            }
+            const transformers = await this._transformersPromise;
+
+            // Create upscaler pipeline (cached)
+            const pipelineKey = `_upscale${scale}x`;
+            if (!this[pipelineKey]) {
+                btn.textContent = '⏳ Downloading SR model...';
+                const model = scale >= 4
+                    ? 'Xenova/swin2SR-lightweight-x2-64'
+                    : 'Xenova/swin2SR-lightweight-x2-64';
+                this[pipelineKey] = await transformers.pipeline('image-to-image', model);
+            }
+            const upscaler = this[pipelineKey];
+
+            // Render current edits to a canvas
+            this._render();
+            const srcCanvas = document.getElementById('main-canvas');
+
+            // The model does 2× — for 4× we run it twice or bicubic the 2× result
+            // Process in tiles if image is large (model has input limits)
+            btn.textContent = '⏳ Upscaling with AI...';
+
+            // Prepare source as blob URL
+            const srcBlob = await new Promise(r => srcCanvas.toBlob(r, 'image/png'));
+            const srcUrl = URL.createObjectURL(srcBlob);
+
+            // Run the model (outputs a RawImage at 2× resolution)
+            const result = await upscaler(srcUrl);
+            URL.revokeObjectURL(srcUrl);
+
+            // Extract result to canvas
+            const img = Array.isArray(result) ? result[0] : result;
+            let resultCanvas;
+            if (img.toCanvas) {
+                resultCanvas = img.toCanvas();
+            } else if (img.width && img.data) {
+                resultCanvas = document.createElement('canvas');
+                resultCanvas.width = img.width;
+                resultCanvas.height = img.height;
+                const ctx = resultCanvas.getContext('2d');
+                const id = ctx.createImageData(img.width, img.height);
+                const ch = img.channels || 4;
+                if (ch === 4) {
+                    id.data.set(new Uint8ClampedArray(img.data.buffer || img.data));
+                } else if (ch === 3) {
+                    for (let i = 0; i < img.width * img.height; i++) {
+                        id.data[i*4] = img.data[i*3];
+                        id.data[i*4+1] = img.data[i*3+1];
+                        id.data[i*4+2] = img.data[i*3+2];
+                        id.data[i*4+3] = 255;
+                    }
+                }
+                ctx.putImageData(id, 0, 0);
+            } else {
+                throw new Error('Unexpected model output');
+            }
+
+            // If 4× requested, bicubic upscale the 2× AI result to 4×
+            let finalCanvas = resultCanvas;
+            if (scale === 4) {
+                btn.textContent = '⏳ Scaling to 4×...';
+                const w4 = resultCanvas.width * 2;
+                const h4 = resultCanvas.height * 2;
+                finalCanvas = document.createElement('canvas');
+                finalCanvas.width = w4;
+                finalCanvas.height = h4;
+                const ctx4 = finalCanvas.getContext('2d');
+                ctx4.imageSmoothingEnabled = true;
+                ctx4.imageSmoothingQuality = 'high';
+                ctx4.drawImage(resultCanvas, 0, 0, w4, h4);
+            }
+
+            finalCanvas.toBlob(onBlob, mimeType, quality);
+
+        } catch (e) {
+            console.error('AI upscale error:', e);
+            alert('AI upscaling failed: ' + e.message + '\nFalling back to bicubic.');
+            // Fallback to bicubic
             this._render();
             const srcCanvas = document.getElementById('main-canvas');
             const outW = Math.round(this.imageWidth * scale);
