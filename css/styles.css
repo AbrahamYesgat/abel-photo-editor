@@ -1243,3 +1243,47 @@ html, body {
     border-color: var(--accent);
     opacity: 1;
 }
+
+/* ==================== Crop Overlay ==================== */
+.crop-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 25;
+    display: none;
+}
+
+.crop-overlay.active {
+    display: block;
+    pointer-events: auto;
+}
+
+.crop-ratios {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.crop-ratio-btn {
+    padding: 5px 10px;
+    font-size: 10px;
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font);
+    transition: all var(--transition);
+}
+
+.crop-ratio-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.crop-ratio-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+.crop-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.crop-actions .btn { flex: 1; justify-content: center; }

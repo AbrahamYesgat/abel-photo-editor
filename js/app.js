@@ -75,6 +75,9 @@ class App {
         this._buildMaskPanel();
         this._buildPresets();
 
+        // Crop tool
+        this.cropTool = new CropTool(this);
+
         // Panel tab switching
         document.querySelectorAll('.panel-tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -86,6 +89,12 @@ class App {
                 // Exit mask mode when switching away from masks panel
                 if (panel !== 'masks') {
                     this._exitMaskMode();
+                }
+                // Activate/deactivate crop tool
+                if (panel === 'crop') {
+                    this.cropTool.activate();
+                } else if (this.cropTool && this.cropTool.active) {
+                    this.cropTool.deactivate();
                 }
             });
         });
@@ -1426,6 +1435,477 @@ class App {
         a.click();
         URL.revokeObjectURL(url);
         this._hideExportModal();
+    }
+}
+
+// ======================== Crop & Straighten Tool ========================
+class CropTool {
+    constructor(app) {
+        this.app = app;
+        this.active = false;
+        this.rotation = 0;
+        this.aspectRatio = null;
+
+        // Crop region in normalized coords (0-1)
+        this.cropX = 0;
+        this.cropY = 0;
+        this.cropW = 1;
+        this.cropH = 1;
+
+        this.dragging = null;
+        this.dragStart = null;
+
+        this.overlay = document.getElementById('crop-overlay');
+        this.overlayCtx = this.overlay.getContext('2d');
+
+        this._buildUI();
+        this._bindEvents();
+    }
+
+    _buildUI() {
+        const ratios = [
+            { label: 'Free', value: null },
+            { label: '1:1', value: 1 },
+            { label: '4:3', value: 4/3 },
+            { label: '3:2', value: 3/2 },
+            { label: '16:9', value: 16/9 },
+            { label: '5:4', value: 5/4 },
+            { label: '2:3', value: 2/3 },
+            { label: '9:16', value: 9/16 },
+        ];
+
+        const container = document.getElementById('crop-ratios');
+        ratios.forEach(r => {
+            const btn = document.createElement('button');
+            btn.className = 'crop-ratio-btn' + (r.value === null ? ' active' : '');
+            btn.textContent = r.label;
+            btn.addEventListener('click', () => {
+                container.querySelectorAll('.crop-ratio-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.setAspectRatio(r.value);
+            });
+            container.appendChild(btn);
+        });
+
+        // Rotation slider
+        const row = document.getElementById('crop-rotation-row');
+        const header = document.createElement('div');
+        header.className = 'slider-header';
+        const lbl = document.createElement('span');
+        lbl.className = 'slider-label';
+        lbl.textContent = 'Angle';
+        const val = document.createElement('span');
+        val.className = 'slider-value';
+        val.textContent = '0°';
+        this._rotVal = val;
+        header.appendChild(lbl);
+        header.appendChild(val);
+
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = -45;
+        input.max = 45;
+        input.step = 0.1;
+        input.value = 0;
+        input.className = 'slider-input';
+        this._rotSlider = input;
+
+        input.addEventListener('input', () => {
+            this.rotation = parseFloat(input.value);
+            val.textContent = this.rotation.toFixed(1) + '°';
+            this._drawOverlay();
+        });
+        input.addEventListener('dblclick', () => {
+            input.value = 0;
+            this.rotation = 0;
+            val.textContent = '0°';
+            this._drawOverlay();
+        });
+
+        row.appendChild(header);
+        row.appendChild(input);
+    }
+
+    _bindEvents() {
+        document.getElementById('crop-apply').addEventListener('click', () => this.apply());
+        document.getElementById('crop-cancel').addEventListener('click', () => this.cancel());
+        document.getElementById('crop-auto-straighten').addEventListener('click', () => this.autoStraighten());
+
+        this.overlay.addEventListener('mousedown', (e) => this._onPointerDown(e));
+        window.addEventListener('mousemove', (e) => this._onPointerMove(e));
+        window.addEventListener('mouseup', () => this._onPointerUp());
+        this.overlay.addEventListener('touchstart', (e) => { e.preventDefault(); this._onPointerDown(e.touches[0]); }, { passive: false });
+        window.addEventListener('touchmove', (e) => { if (this.dragging) this._onPointerMove(e.touches[0]); }, { passive: false });
+        window.addEventListener('touchend', () => this._onPointerUp());
+    }
+
+    activate() {
+        if (!this.app.image) return;
+        this.active = true;
+        this.rotation = 0;
+        this.cropX = 0; this.cropY = 0;
+        this.cropW = 1; this.cropH = 1;
+        this.aspectRatio = null;
+        this._rotSlider.value = 0;
+        this._rotVal.textContent = '0°';
+
+        // Reset aspect ratio buttons
+        const container = document.getElementById('crop-ratios');
+        container.querySelectorAll('.crop-ratio-btn').forEach((b, i) => {
+            b.classList.toggle('active', i === 0);
+        });
+
+        // Size overlay to match the container
+        const canvas = document.getElementById('main-canvas');
+        const rect = canvas.getBoundingClientRect();
+        const containerEl = document.getElementById('canvas-container');
+        const cRect = containerEl.getBoundingClientRect();
+        this.overlay.width = cRect.width;
+        this.overlay.height = cRect.height;
+        this.overlay.classList.add('active');
+
+        this._canvasRect = {
+            x: rect.left - cRect.left,
+            y: rect.top - cRect.top,
+            w: rect.width,
+            h: rect.height,
+        };
+
+        this._drawOverlay();
+    }
+
+    deactivate() {
+        this.active = false;
+        this.overlay.classList.remove('active');
+    }
+
+    setAspectRatio(ratio) {
+        this.aspectRatio = ratio;
+        if (ratio !== null) {
+            const imgAspect = this.app.imageWidth / this.app.imageHeight;
+            let newW = this.cropW;
+            let newH = this.cropH;
+            const cropAspect = (newW * imgAspect) / newH;
+
+            if (cropAspect > ratio) {
+                newW = (ratio * newH) / imgAspect;
+            } else {
+                newH = (newW * imgAspect) / ratio;
+            }
+
+            this.cropX = this.cropX + (this.cropW - newW) / 2;
+            this.cropY = this.cropY + (this.cropH - newH) / 2;
+            this.cropW = newW;
+            this.cropH = newH;
+            this._clampCrop();
+        }
+        this._drawOverlay();
+    }
+
+    _clampCrop() {
+        this.cropW = Math.max(0.05, Math.min(1, this.cropW));
+        this.cropH = Math.max(0.05, Math.min(1, this.cropH));
+        this.cropX = Math.max(0, Math.min(1 - this.cropW, this.cropX));
+        this.cropY = Math.max(0, Math.min(1 - this.cropH, this.cropY));
+    }
+
+    _drawOverlay() {
+        if (!this.active) return;
+        const ctx = this.overlayCtx;
+        const ow = this.overlay.width;
+        const oh = this.overlay.height;
+        const cr = this._canvasRect;
+
+        ctx.clearRect(0, 0, ow, oh);
+
+        // Dark overlay outside crop
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, ow, oh);
+
+        // Crop rect in pixel coords
+        const cx = cr.x + this.cropX * cr.w;
+        const cy = cr.y + this.cropY * cr.h;
+        const cw = this.cropW * cr.w;
+        const ch = this.cropH * cr.h;
+
+        // Clear the crop area
+        ctx.clearRect(cx, cy, cw, ch);
+
+        // Crop border
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cx, cy, cw, ch);
+
+        // Rule of thirds grid
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 0.5;
+        for (let i = 1; i <= 2; i++) {
+            const gx = cx + (cw * i) / 3;
+            const gy = cy + (ch * i) / 3;
+            ctx.beginPath(); ctx.moveTo(gx, cy); ctx.lineTo(gx, cy + ch); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, gy); ctx.lineTo(cx + cw, gy); ctx.stroke();
+        }
+
+        // Corner handles
+        const hs = 12;
+        ctx.fillStyle = '#fff';
+        const corners = [
+            [cx, cy], [cx + cw, cy], [cx, cy + ch], [cx + cw, cy + ch]
+        ];
+        corners.forEach(([hx, hy]) => {
+            ctx.fillRect(hx - hs/2, hy - hs/2, hs, hs);
+        });
+
+        // Show rotation angle if non-zero
+        if (Math.abs(this.rotation) > 0.1) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            ctx.font = '11px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(this.rotation.toFixed(1) + '°', cx + cw/2, cy - 8);
+            ctx.restore();
+        }
+    }
+
+    _overlayToNorm(clientX, clientY) {
+        const rect = this.overlay.getBoundingClientRect();
+        const cr = this._canvasRect;
+        return {
+            nx: (clientX - rect.left - cr.x) / cr.w,
+            ny: (clientY - rect.top - cr.y) / cr.h,
+        };
+    }
+
+    _getHandle(nx, ny) {
+        const t = 0.03;
+        const cx = this.cropX, cy = this.cropY;
+        const cw = this.cropW, ch = this.cropH;
+
+        if (Math.abs(nx - cx) < t && Math.abs(ny - cy) < t) return 'tl';
+        if (Math.abs(nx - (cx+cw)) < t && Math.abs(ny - cy) < t) return 'tr';
+        if (Math.abs(nx - cx) < t && Math.abs(ny - (cy+ch)) < t) return 'bl';
+        if (Math.abs(nx - (cx+cw)) < t && Math.abs(ny - (cy+ch)) < t) return 'br';
+
+        if (Math.abs(ny - cy) < t && nx > cx && nx < cx+cw) return 't';
+        if (Math.abs(ny - (cy+ch)) < t && nx > cx && nx < cx+cw) return 'b';
+        if (Math.abs(nx - cx) < t && ny > cy && ny < cy+ch) return 'l';
+        if (Math.abs(nx - (cx+cw)) < t && ny > cy && ny < cy+ch) return 'r';
+
+        if (nx >= cx && nx <= cx+cw && ny >= cy && ny <= cy+ch) return 'move';
+
+        return null;
+    }
+
+    _onPointerDown(e) {
+        if (!this.active) return;
+        const { nx, ny } = this._overlayToNorm(e.clientX, e.clientY);
+        this.dragging = this._getHandle(nx, ny);
+        this.dragStart = { nx, ny, cx: this.cropX, cy: this.cropY, cw: this.cropW, ch: this.cropH };
+    }
+
+    _onPointerMove(e) {
+        if (!this.active || !this.dragging) return;
+        const { nx, ny } = this._overlayToNorm(e.clientX, e.clientY);
+        const dx = nx - this.dragStart.nx;
+        const dy = ny - this.dragStart.ny;
+        const s = this.dragStart;
+
+        if (this.dragging === 'move') {
+            this.cropX = s.cx + dx;
+            this.cropY = s.cy + dy;
+        } else {
+            let newX = s.cx, newY = s.cy, newW = s.cw, newH = s.ch;
+
+            if (this.dragging.includes('l')) { newX = s.cx + dx; newW = s.cw - dx; }
+            if (this.dragging.includes('r')) { newW = s.cw + dx; }
+            if (this.dragging.includes('t')) { newY = s.cy + dy; newH = s.ch - dy; }
+            if (this.dragging.includes('b')) { newH = s.ch + dy; }
+
+            // Enforce aspect ratio on corner drags
+            if (this.aspectRatio !== null && this.dragging.length === 2) {
+                const imgAspect = this.app.imageWidth / this.app.imageHeight;
+                const targetAspect = this.aspectRatio / imgAspect;
+                newH = newW / targetAspect;
+            }
+
+            if (newW > 0.05 && newH > 0.05) {
+                this.cropX = newX; this.cropY = newY;
+                this.cropW = newW; this.cropH = newH;
+            }
+        }
+
+        this._clampCrop();
+        this._drawOverlay();
+
+        const cursors = { tl: 'nw-resize', tr: 'ne-resize', bl: 'sw-resize', br: 'se-resize',
+                          t: 'n-resize', b: 's-resize', l: 'w-resize', r: 'e-resize', move: 'move' };
+        this.overlay.style.cursor = cursors[this.dragging] || 'crosshair';
+    }
+
+    _onPointerUp() {
+        this.dragging = null;
+        if (this.active) this.overlay.style.cursor = 'crosshair';
+    }
+
+    autoStraighten() {
+        if (!this.app.image) return;
+
+        const maxDim = 400;
+        let sw = this.app.imageWidth, sh = this.app.imageHeight;
+        const scale = Math.min(1, maxDim / Math.max(sw, sh));
+        sw = Math.round(sw * scale);
+        sh = Math.round(sh * scale);
+
+        const c = document.createElement('canvas');
+        c.width = sw; c.height = sh;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(this.app.image, 0, 0, sw, sh);
+        const data = ctx.getImageData(0, 0, sw, sh).data;
+
+        // Grayscale
+        const gray = new Float32Array(sw * sh);
+        for (let i = 0; i < sw * sh; i++) {
+            gray[i] = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2];
+        }
+
+        // Sobel
+        const gx = new Float32Array(sw * sh);
+        const gy = new Float32Array(sw * sh);
+        for (let y = 1; y < sh - 1; y++) {
+            for (let x = 1; x < sw - 1; x++) {
+                const i = y * sw + x;
+                gx[i] = -gray[i-sw-1] + gray[i-sw+1] - 2*gray[i-1] + 2*gray[i+1] - gray[i+sw-1] + gray[i+sw+1];
+                gy[i] = -gray[i-sw-1] - 2*gray[i-sw] - gray[i-sw+1] + gray[i+sw-1] + 2*gray[i+sw] + gray[i+sw+1];
+            }
+        }
+
+        // Accumulate angles of strong edges
+        const angleBins = new Float32Array(900); // -45 to +45 in 0.1° steps
+        let totalWeight = 0;
+
+        for (let y = 2; y < sh - 2; y++) {
+            for (let x = 2; x < sw - 2; x++) {
+                const i = y * sw + x;
+                const mag = Math.sqrt(gx[i]*gx[i] + gy[i]*gy[i]);
+                if (mag < 30) continue;
+
+                const angle = Math.atan2(gy[i], gx[i]) * 180 / Math.PI;
+
+                let deviation;
+                if (Math.abs(angle) < 45 || Math.abs(angle) > 135) {
+                    deviation = angle > 90 ? angle - 180 : (angle < -90 ? angle + 180 : angle);
+                } else {
+                    deviation = angle > 0 ? angle - 90 : angle + 90;
+                }
+
+                if (Math.abs(deviation) <= 45) {
+                    const bin = Math.round((deviation + 45) * 10);
+                    if (bin >= 0 && bin < 900) {
+                        angleBins[bin] += mag;
+                        totalWeight += mag;
+                    }
+                }
+            }
+        }
+
+        if (totalWeight < 100) return;
+
+        // Smooth histogram
+        const smoothed = new Float32Array(900);
+        for (let i = 5; i < 895; i++) {
+            let sum = 0;
+            for (let j = -5; j <= 5; j++) sum += angleBins[i + j];
+            smoothed[i] = sum;
+        }
+
+        let peakBin = 450;
+        let peakVal = 0;
+        for (let i = 0; i < 900; i++) {
+            if (smoothed[i] > peakVal) { peakVal = smoothed[i]; peakBin = i; }
+        }
+
+        const detectedAngle = (peakBin - 450) / 10;
+
+        if (Math.abs(detectedAngle) < 10 && Math.abs(detectedAngle) > 0.2) {
+            this.rotation = -detectedAngle;
+            this._rotSlider.value = this.rotation;
+            this._rotVal.textContent = this.rotation.toFixed(1) + '°';
+            this._drawOverlay();
+        }
+    }
+
+    apply() {
+        if (!this.app.image) return;
+
+        const iw = this.app.imageWidth;
+        const ih = this.app.imageHeight;
+
+        const sx = Math.round(this.cropX * iw);
+        const sy = Math.round(this.cropY * ih);
+        const sw = Math.round(this.cropW * iw);
+        const sh = Math.round(this.cropH * ih);
+
+        const out = document.createElement('canvas');
+
+        if (Math.abs(this.rotation) < 0.1) {
+            out.width = sw;
+            out.height = sh;
+            const ctx = out.getContext('2d');
+            ctx.drawImage(this.app.image, sx, sy, sw, sh, 0, 0, sw, sh);
+        } else {
+            const rad = this.rotation * Math.PI / 180;
+
+            out.width = sw;
+            out.height = sh;
+
+            // Rotate the full image, then crop from it
+            const rotCanvas = document.createElement('canvas');
+            rotCanvas.width = iw;
+            rotCanvas.height = ih;
+            const rCtx = rotCanvas.getContext('2d');
+            rCtx.translate(iw/2, ih/2);
+            rCtx.rotate(rad);
+            rCtx.translate(-iw/2, -ih/2);
+            rCtx.drawImage(this.app.image, 0, 0);
+
+            const ctx = out.getContext('2d');
+            ctx.drawImage(rotCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+        }
+
+        // Replace the app's source image with the cropped result
+        const newImg = new Image();
+        newImg.onload = () => {
+            this.app.image = newImg;
+            this.app.imageWidth = newImg.width;
+            this.app.imageHeight = newImg.height;
+            this.app.glEngine.loadImage(newImg);
+            this.app._fitCanvas();
+            this.app._hideCompositeOverlay();
+            this.app._render();
+            this.app._pushHistory();
+
+            // Clear masks since image dimensions changed
+            if (this.app.maskEngine && this.app.maskEngine.masks) {
+                this.app.maskEngine.masks.length = 0;
+                if (typeof this.app.maskEngine._renderList === 'function') {
+                    this.app.maskEngine._renderList();
+                }
+            }
+
+            this.deactivate();
+        };
+        newImg.src = out.toDataURL('image/png');
+    }
+
+    cancel() {
+        this.deactivate();
+        // Switch to basic panel
+        document.querySelectorAll('.panel-tab').forEach(t => {
+            const isBasic = t.dataset.panel === 'basic';
+            t.classList.toggle('active', isBasic);
+        });
+        document.querySelectorAll('.edit-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById('panel-basic').classList.add('active');
     }
 }
 

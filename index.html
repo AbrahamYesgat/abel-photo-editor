@@ -91,6 +91,7 @@
         <div class="canvas-container" id="canvas-container">
             <canvas id="main-canvas"></canvas>
             <canvas id="mask-overlay" style="display:none;"></canvas>
+            <canvas id="crop-overlay" class="crop-overlay"></canvas>
             <div class="drop-zone" id="drop-zone">
                 <div class="drop-zone-content">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -137,6 +138,7 @@
 
         <!-- Panel Tabs -->
         <div class="panel-tabs">
+            <button class="panel-tab" data-panel="crop">Crop</button>
             <button class="panel-tab active" data-panel="basic">Basic</button>
             <button class="panel-tab" data-panel="curve">Curve</button>
             <button class="panel-tab" data-panel="hsl">HSL</button>
@@ -148,6 +150,19 @@
 
         <!-- Panel Contents -->
         <div class="panels-container">
+            <div class="edit-panel" id="panel-crop">
+                <div class="panel-section-header">Aspect Ratio</div>
+                <div id="crop-ratios" class="crop-ratios"></div>
+                <div class="panel-separator"></div>
+                <div class="panel-section-header">Straighten</div>
+                <div class="slider-row" id="crop-rotation-row"></div>
+                <button class="btn btn-sm btn-outline" id="crop-auto-straighten" style="margin-bottom:12px;">⟳ Auto Straighten</button>
+                <div class="panel-separator"></div>
+                <div class="crop-actions">
+                    <button class="btn btn-outline" id="crop-cancel">Cancel</button>
+                    <button class="btn btn-accent" id="crop-apply">Apply Crop</button>
+                </div>
+            </div>
             <div class="edit-panel active" id="panel-basic"></div>
             <div class="edit-panel" id="panel-curve">
                 <div id="curve-container" class="curve-container"></div>
@@ -166,6 +181,7 @@
 <!-- Mobile Bottom Tabs -->
 <nav class="mobile-tabs">
     <div class="mobile-tabs-inner">
+        <button class="mobile-tab" data-panel="crop">Crop</button>
         <button class="mobile-tab active" data-panel="basic">Basic</button>
         <button class="mobile-tab" data-panel="curve">Curve</button>
         <button class="mobile-tab" data-panel="hsl">HSL</button>
