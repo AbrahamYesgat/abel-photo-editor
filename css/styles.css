@@ -30,7 +30,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
-    height: 100%;
+    height: 100dvh;
+    height: 100vh; /* fallback for older browsers */
     overflow: hidden;
     font-family: var(--font);
     font-size: 11px;
@@ -186,7 +187,7 @@ html, body {
 /* ===================== Layout ===================== */
 .editor-layout {
     display: flex;
-    height: calc(100vh - var(--toolbar-height));
+    height: calc(100dvh - var(--toolbar-height)); height: calc(100vh - var(--toolbar-height));
     overflow: hidden;
 }
 
@@ -1124,7 +1125,7 @@ html, body {
     #btn-library { font-size: 0; }
     #btn-library svg { width: 16px; height: 16px; }
 
-    .editor-layout { flex-direction: column; height: calc(100vh - 42px); }
+    .editor-layout { flex-direction: column; height: calc(100dvh - 42px); }
     .sidebar-left { display: none; }
     .resize-handle { display: none; }
 
@@ -1132,7 +1133,7 @@ html, body {
         position: fixed;
         top: 0; right: -100%;
         width: 88vw; max-width: 340px;
-        height: 100vh;
+        height: 100dvh;
         z-index: 200;
         transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         box-shadow: -4px 0 24px rgba(0, 0, 0, 0.6);

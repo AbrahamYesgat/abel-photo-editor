@@ -1,0 +1,16 @@
+{
+    "name": "ABEL Photo Editor",
+    "short_name": "ABEL",
+    "description": "Professional photo editor with AI masking and Lightroom-style adjustments",
+    "start_url": "/abel-photo-editor/",
+    "display": "standalone",
+    "background_color": "#111111",
+    "theme_color": "#111111",
+    "icons": [
+        {
+            "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L3 22h18L12 2z' fill='%236366f1'/><path d='M12 8l-4.5 10h9L12 8z' fill='%23818cf8'/></svg>",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ]
+}
