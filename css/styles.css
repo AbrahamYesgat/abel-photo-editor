@@ -1058,6 +1058,8 @@ html, body {
     border-top: 1px solid var(--border);
     flex-shrink: 0;
     z-index: 50;
+    height: 44px;
+    min-height: 44px;
 }
 
 .mobile-tabs-inner {
@@ -1065,6 +1067,8 @@ html, body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    height: 100%;
+    align-items: center;
 }
 
 .mobile-tabs-inner::-webkit-scrollbar { display: none; }
