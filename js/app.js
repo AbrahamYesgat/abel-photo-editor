@@ -1852,39 +1852,47 @@ class CropTool {
         const iw = this.app.imageWidth;
         const ih = this.app.imageHeight;
 
-        const sx = Math.round(this.cropX * iw);
-        const sy = Math.round(this.cropY * ih);
-        const sw = Math.round(this.cropW * iw);
-        const sh = Math.round(this.cropH * ih);
+        // Cap working resolution to avoid canvas size limits
+        const maxDim = 4096;
+        let workW = iw, workH = ih;
+        if (workW > maxDim || workH > maxDim) {
+            const s = maxDim / Math.max(workW, workH);
+            workW = Math.round(workW * s);
+            workH = Math.round(workH * s);
+        }
+
+        const sx = Math.round(this.cropX * workW);
+        const sy = Math.round(this.cropY * workH);
+        const sw = Math.round(this.cropW * workW);
+        const sh = Math.round(this.cropH * workH);
 
         const out = document.createElement('canvas');
+        out.width = sw;
+        out.height = sh;
+        const ctx = out.getContext('2d');
 
         if (Math.abs(this.rotation) < 0.1) {
-            out.width = sw;
-            out.height = sh;
-            const ctx = out.getContext('2d');
+            // Simple crop, no rotation
             ctx.drawImage(this.app.image, sx, sy, sw, sh, 0, 0, sw, sh);
         } else {
+            // Draw the full image rotated at working resolution, then crop from it
             const rad = this.rotation * Math.PI / 180;
-
-            out.width = sw;
-            out.height = sh;
-
-            // Rotate the full image, then crop from it
             const rotCanvas = document.createElement('canvas');
-            rotCanvas.width = iw;
-            rotCanvas.height = ih;
+            rotCanvas.width = workW;
+            rotCanvas.height = workH;
             const rCtx = rotCanvas.getContext('2d');
-            rCtx.translate(iw/2, ih/2);
+            rCtx.translate(workW / 2, workH / 2);
             rCtx.rotate(rad);
-            rCtx.translate(-iw/2, -ih/2);
-            rCtx.drawImage(this.app.image, 0, 0);
+            rCtx.translate(-workW / 2, -workH / 2);
+            rCtx.drawImage(this.app.image, 0, 0, workW, workH);
 
-            const ctx = out.getContext('2d');
             ctx.drawImage(rotCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
         }
 
-        // Replace the app's source image with the cropped result
+        // Clear CSS rotation preview
+        document.getElementById('main-canvas').style.transform = '';
+
+        // Replace the app's source image
         const newImg = new Image();
         newImg.onload = () => {
             this.app.image = newImg;
@@ -1896,13 +1904,10 @@ class CropTool {
             this.app._render();
             this.app._pushHistory();
 
-            // Clear masks since image dimensions changed
-            if (this.app.maskEngine && this.app.maskEngine.masks) {
-                this.app.maskEngine.masks.length = 0;
-                if (typeof this.app.maskEngine._renderList === 'function') {
-                    this.app.maskEngine._renderList();
-                }
-            }
+            // Clear masks since dimensions changed
+            this.app.maskEngine.masks = [];
+            this.app.maskEngine.activeMaskIndex = -1;
+            this.app._updateMaskList();
 
             this.deactivate();
         };
