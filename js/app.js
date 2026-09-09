@@ -1454,34 +1454,43 @@ class App {
             const transformers = await this._transformersPromise;
 
             // Create upscaler pipeline (cached)
-            const pipelineKey = `_upscale${scale}x`;
-            if (!this[pipelineKey]) {
-                btn.textContent = '⏳ Downloading SR model...';
-                const model = scale >= 4
-                    ? 'Xenova/swin2SR-lightweight-x2-64'
-                    : 'Xenova/swin2SR-lightweight-x2-64';
-                this[pipelineKey] = await transformers.pipeline('image-to-image', model);
+            if (!this._upscalePipeline) {
+                btn.textContent = '⏳ Downloading SR model (~5MB)...';
+                this._upscalePipeline = await transformers.pipeline(
+                    'image-to-image',
+                    'Xenova/swin2SR-classical-sr-x2-64',
+                    { dtype: 'fp32' }
+                );
             }
-            const upscaler = this[pipelineKey];
+            const upscaler = this._upscalePipeline;
 
-            // Render current edits to a canvas
+            // Render current edits
             this._render();
             const srcCanvas = document.getElementById('main-canvas');
 
-            // The model does 2× — for 4× we run it twice or bicubic the 2× result
-            // Process in tiles if image is large (model has input limits)
-            btn.textContent = '⏳ Upscaling with AI...';
+            // Downsize source if too large for the model (max ~1000px per side)
+            const maxModelInput = 800;
+            let inputCanvas = srcCanvas;
+            if (srcCanvas.width > maxModelInput || srcCanvas.height > maxModelInput) {
+                const s = maxModelInput / Math.max(srcCanvas.width, srcCanvas.height);
+                inputCanvas = document.createElement('canvas');
+                inputCanvas.width = Math.round(srcCanvas.width * s);
+                inputCanvas.height = Math.round(srcCanvas.height * s);
+                const ctx = inputCanvas.getContext('2d');
+                ctx.drawImage(srcCanvas, 0, 0, inputCanvas.width, inputCanvas.height);
+            }
 
-            // Prepare source as blob URL
-            const srcBlob = await new Promise(r => srcCanvas.toBlob(r, 'image/png'));
-            const srcUrl = URL.createObjectURL(srcBlob);
+            btn.textContent = '⏳ Upscaling with AI (this takes a moment)...';
+            await new Promise(r => setTimeout(r, 50));
 
-            // Run the model (outputs a RawImage at 2× resolution)
-            const result = await upscaler(srcUrl);
-            URL.revokeObjectURL(srcUrl);
+            // Convert to data URL (more reliable than blob URL for the model)
+            const dataUrl = inputCanvas.toDataURL('image/png');
+
+            // Run the 2× model
+            const result = await upscaler(dataUrl);
+            const img = Array.isArray(result) ? result[0] : result;
 
             // Extract result to canvas
-            const img = Array.isArray(result) ? result[0] : result;
             let resultCanvas;
             if (img.toCanvas) {
                 resultCanvas = img.toCanvas();
@@ -1491,43 +1500,34 @@ class App {
                 resultCanvas.height = img.height;
                 const ctx = resultCanvas.getContext('2d');
                 const id = ctx.createImageData(img.width, img.height);
-                const ch = img.channels || 4;
-                if (ch === 4) {
-                    id.data.set(new Uint8ClampedArray(img.data.buffer || img.data));
-                } else if (ch === 3) {
-                    for (let i = 0; i < img.width * img.height; i++) {
-                        id.data[i*4] = img.data[i*3];
-                        id.data[i*4+1] = img.data[i*3+1];
-                        id.data[i*4+2] = img.data[i*3+2];
-                        id.data[i*4+3] = 255;
+                const ch = img.channels || 3;
+                for (let i = 0; i < img.width * img.height; i++) {
+                    for (let c = 0; c < Math.min(ch, 3); c++) {
+                        id.data[i * 4 + c] = img.data[i * ch + c];
                     }
+                    id.data[i * 4 + 3] = 255;
                 }
                 ctx.putImageData(id, 0, 0);
             } else {
                 throw new Error('Unexpected model output');
             }
 
-            // If 4× requested, bicubic upscale the 2× AI result to 4×
-            let finalCanvas = resultCanvas;
-            if (scale === 4) {
-                btn.textContent = '⏳ Scaling to 4×...';
-                const w4 = resultCanvas.width * 2;
-                const h4 = resultCanvas.height * 2;
-                finalCanvas = document.createElement('canvas');
-                finalCanvas.width = w4;
-                finalCanvas.height = h4;
-                const ctx4 = finalCanvas.getContext('2d');
-                ctx4.imageSmoothingEnabled = true;
-                ctx4.imageSmoothingQuality = 'high';
-                ctx4.drawImage(resultCanvas, 0, 0, w4, h4);
-            }
+            // Scale to final target size
+            const targetW = Math.round(this.imageWidth * scale);
+            const targetH = Math.round(this.imageHeight * scale);
+            const finalCanvas = document.createElement('canvas');
+            finalCanvas.width = targetW;
+            finalCanvas.height = targetH;
+            const fCtx = finalCanvas.getContext('2d');
+            fCtx.imageSmoothingEnabled = true;
+            fCtx.imageSmoothingQuality = 'high';
+            fCtx.drawImage(resultCanvas, 0, 0, targetW, targetH);
 
             finalCanvas.toBlob(onBlob, mimeType, quality);
 
         } catch (e) {
             console.error('AI upscale error:', e);
             alert('AI upscaling failed: ' + e.message + '\nFalling back to bicubic.');
-            // Fallback to bicubic
             this._render();
             const srcCanvas = document.getElementById('main-canvas');
             const outW = Math.round(this.imageWidth * scale);
