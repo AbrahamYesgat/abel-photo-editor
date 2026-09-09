@@ -114,6 +114,7 @@ class App {
                 switchPanel(panel, null);
                 document.querySelector('.sidebar-right').classList.add('mobile-open');
                 document.getElementById('mobile-backdrop')?.classList.add('visible');
+                setTimeout(() => this._fitCanvas(), 350); // refit after animation
             });
         });
     }
@@ -698,20 +699,62 @@ class App {
         });
 
         // Close mobile panel
-        document.getElementById('close-sidebar')?.addEventListener('click', () => {
+        const closeMobilePanel = () => {
             document.querySelector('.sidebar-right').classList.remove('mobile-open');
             document.getElementById('mobile-backdrop')?.classList.remove('visible');
-        });
+            setTimeout(() => this._fitCanvas(), 350);
+        };
+
+        document.getElementById('close-sidebar')?.addEventListener('click', closeMobilePanel);
 
         // Mobile backdrop: tap outside panel to close
         const backdrop = document.createElement('div');
         backdrop.id = 'mobile-backdrop';
         backdrop.className = 'mobile-backdrop';
         document.body.appendChild(backdrop);
-        backdrop.addEventListener('click', () => {
-            document.querySelector('.sidebar-right').classList.remove('mobile-open');
-            backdrop.classList.remove('visible');
+        backdrop.addEventListener('click', closeMobilePanel);
+
+        // Tap on canvas area to close mobile panel
+        document.getElementById('canvas-container')?.addEventListener('click', (e) => {
+            if (window.innerWidth <= 700 && document.querySelector('.sidebar-right.mobile-open')) {
+                if (e.target.id === 'main-canvas' || e.target.closest('.canvas-container')) {
+                    closeMobilePanel();
+                }
+            }
         });
+
+        // Swipe down on bottom sheet to dismiss
+        (() => {
+            const sidebar = document.querySelector('.sidebar-right');
+            if (!sidebar) return;
+            let startY = 0, currentY = 0, swiping = false;
+
+            sidebar.addEventListener('touchstart', (e) => {
+                startY = e.touches[0].clientY;
+                swiping = true;
+            }, { passive: true });
+
+            sidebar.addEventListener('touchmove', (e) => {
+                if (!swiping) return;
+                currentY = e.touches[0].clientY;
+                const dy = currentY - startY;
+                if (dy > 0) {
+                    sidebar.style.transform = `translateY(${dy}px)`;
+                    sidebar.style.transition = 'none';
+                }
+            }, { passive: true });
+
+            sidebar.addEventListener('touchend', () => {
+                if (!swiping) return;
+                swiping = false;
+                sidebar.style.transition = '';
+                const dy = currentY - startY;
+                if (dy > 60) {
+                    closeMobilePanel();
+                }
+                sidebar.style.transform = '';
+            });
+        })();
 
         // Resizable sidebar
         this._initResizeHandle();
@@ -827,10 +870,23 @@ class App {
         if (!this.image || !this.glEngine) return;
         const container = document.getElementById('canvas-container');
         const canvas = document.getElementById('main-canvas');
-        const cw = container.clientWidth - 32;
-        const ch = container.clientHeight - 32;
         const iw = this.imageWidth;
         const ih = this.imageHeight;
+
+        let cw = container.clientWidth - 24;
+        let ch = container.clientHeight - 16;
+
+        // On mobile, reduce available height when bottom sheet is open
+        if (window.innerWidth <= 700) {
+            const sidebar = document.querySelector('.sidebar-right');
+            if (sidebar && sidebar.classList.contains('mobile-open')) {
+                // Sheet is open — photo gets less space
+                ch = Math.min(ch, window.innerHeight * 0.42);
+            } else {
+                // Sheet closed — leave room for tab bar
+                ch = container.clientHeight - 8;
+            }
+        }
 
         if (!cw || !ch || !iw || !ih) return;
 
