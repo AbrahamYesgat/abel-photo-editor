@@ -1577,6 +1577,7 @@ class CropTool {
     deactivate() {
         this.active = false;
         this.overlay.classList.remove('active');
+        document.getElementById('main-canvas').style.transform = '';
     }
 
     setAspectRatio(ratio) {
@@ -1618,6 +1619,14 @@ class CropTool {
 
         ctx.clearRect(0, 0, ow, oh);
 
+        // Apply CSS rotation to the main canvas for live preview
+        const mainCanvas = document.getElementById('main-canvas');
+        if (Math.abs(this.rotation) > 0.05) {
+            mainCanvas.style.transform = `rotate(${this.rotation}deg)`;
+        } else {
+            mainCanvas.style.transform = '';
+        }
+
         // Dark overlay outside crop
         ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
         ctx.fillRect(0, 0, ow, oh);
@@ -1656,13 +1665,13 @@ class CropTool {
             ctx.fillRect(hx - hs/2, hy - hs/2, hs, hs);
         });
 
-        // Show rotation angle if non-zero
+        // Show rotation angle
         if (Math.abs(this.rotation) > 0.1) {
             ctx.save();
-            ctx.fillStyle = 'rgba(255,255,255,0.8)';
-            ctx.font = '11px -apple-system, sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.font = 'bold 12px -apple-system, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(this.rotation.toFixed(1) + '°', cx + cw/2, cy - 8);
+            ctx.fillText(this.rotation.toFixed(1) + '°', cx + cw/2, cy - 10);
             ctx.restore();
         }
     }
