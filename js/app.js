@@ -113,6 +113,7 @@ class App {
                 tab.classList.add('active');
                 switchPanel(panel, null);
                 document.querySelector('.sidebar-right').classList.add('mobile-open');
+                document.getElementById('mobile-backdrop')?.classList.add('visible');
             });
         });
     }
@@ -681,6 +682,17 @@ class App {
         // Close mobile panel
         document.getElementById('close-sidebar')?.addEventListener('click', () => {
             document.querySelector('.sidebar-right').classList.remove('mobile-open');
+            document.getElementById('mobile-backdrop')?.classList.remove('visible');
+        });
+
+        // Mobile backdrop: tap outside panel to close
+        const backdrop = document.createElement('div');
+        backdrop.id = 'mobile-backdrop';
+        backdrop.className = 'mobile-backdrop';
+        document.body.appendChild(backdrop);
+        backdrop.addEventListener('click', () => {
+            document.querySelector('.sidebar-right').classList.remove('mobile-open');
+            backdrop.classList.remove('visible');
         });
 
         // Resizable sidebar

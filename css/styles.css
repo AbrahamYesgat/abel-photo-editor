@@ -1089,22 +1089,32 @@ html, body {
 /* ===================== Responsive ===================== */
 @media (max-width: 900px) {
     .sidebar-left { display: none; }
-    .sidebar-right { width: 260px; }
+    .sidebar-right { width: 280px; }
 }
 
 @media (max-width: 700px) {
-    .toolbar { padding: 0 10px; height: 38px; }
-    .toolbar button { padding: 5px 7px; font-size: 10px; }
-    .logo { font-size: 12px; margin-right: 10px; }
+    .toolbar { padding: 0 6px; height: 42px; }
+    .toolbar button { padding: 5px 6px; font-size: 10px; }
+    .toolbar button svg { width: 12px; height: 12px; }
+    .logo { font-size: 11px; margin-right: 6px; letter-spacing: 1px; }
+    .logo-icon { display: none; }
+    .separator { display: none; }
 
-    .editor-layout { flex-direction: column; height: calc(100vh - 38px); }
+    /* Hide text labels on toolbar buttons, keep icons */
+    #btn-undo, #btn-redo { font-size: 0; }
+    #btn-undo svg, #btn-redo svg { width: 16px; height: 16px; }
+    #btn-batch { display: none; }
+    #btn-library { font-size: 0; }
+    #btn-library svg { width: 16px; height: 16px; }
+
+    .editor-layout { flex-direction: column; height: calc(100vh - 42px); }
     .sidebar-left { display: none; }
     .resize-handle { display: none; }
 
     .sidebar-right {
         position: fixed;
         top: 0; right: -100%;
-        width: 85vw; max-width: 320px;
+        width: 88vw; max-width: 340px;
         height: 100vh;
         z-index: 200;
         transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1113,14 +1123,56 @@ html, body {
 
     .sidebar-right.mobile-open { right: 0; }
     .sidebar-close { display: flex; }
+
+    /* On mobile, hide vtabs and use bottom tabs instead */
+    .vtabs { display: none; }
+    .sidebar-right-inner { flex-direction: column; }
+    .vpanel-area { width: 100%; }
+
     .mobile-tabs { display: block; }
     .canvas-area { flex: 1; }
 
     #btn-before-after { display: none; }
+
+    /* Histogram smaller on mobile */
+    #histogram-canvas { height: 40px; }
+
+    /* Filmstrip shorter */
+    .filmstrip { height: 52px; }
+    .filmstrip-thumb { width: 40px; height: 40px; }
+
+    /* Modal full width on mobile */
+    .modal { width: 95vw; max-width: none; padding: 16px; }
+    .modal-wide { width: 95vw; }
+
+    /* Crop ratios wrap better */
+    .crop-ratio-btn { padding: 6px 8px; }
+
+    /* Library grid smaller thumbs */
+    .library-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 4px; }
 }
 
 @media (max-width: 400px) {
-    .toolbar button { padding: 4px 5px; font-size: 9px; gap: 3px; }
+    .toolbar button { padding: 4px 4px; font-size: 9px; gap: 2px; }
+    .toolbar-left { gap: 1px; }
+    .toolbar-center { gap: 1px; }
+    .toolbar-right { gap: 1px; }
+    #btn-auto { font-size: 0; }
+    #btn-auto svg { width: 16px; height: 16px; }
+    #btn-reset { display: none; }
+}
+
+/* ===================== Mobile Backdrop ===================== */
+.mobile-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 199;
+}
+
+@media (max-width: 700px) {
+    .mobile-backdrop.visible { display: block; }
 }
 
 /* ===================== Animations ===================== */
