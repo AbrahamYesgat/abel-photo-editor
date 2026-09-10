@@ -857,6 +857,9 @@ class App {
     // ======================== File I/O ========================
 
     _loadFile(file) {
+        // Store original filename for export
+        this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
+
         return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -1160,7 +1163,7 @@ class App {
 
     _undo() {
         // If a crop was just applied, undo it by restoring the original image
-        if (this._preCropImage && this.historyIndex <= 1) {
+        if (this._preCropImage) {
             this.image = this._preCropImage;
             this.imageWidth = this._preCropWidth;
             this.imageHeight = this._preCropHeight;
@@ -1705,7 +1708,7 @@ class App {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `ABEL_photo.${format}`;
+        a.download = `${this._fileName || 'ABEL_photo'}_ABEL.${format}`;
         a.click();
         URL.revokeObjectURL(url);
         this._hideExportModal();
