@@ -2082,13 +2082,11 @@ class CropTool {
         ctx.drawImage(this.app.image, 0, 0, sw, sh);
         const data = ctx.getImageData(0, 0, sw, sh).data;
 
-        // Grayscale
         const gray = new Float32Array(sw * sh);
         for (let i = 0; i < sw * sh; i++) {
             gray[i] = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2];
         }
 
-        // Sobel
         const gx = new Float32Array(sw * sh);
         const gy = new Float32Array(sw * sh);
         for (let y = 1; y < sh - 1; y++) {
@@ -2099,8 +2097,7 @@ class CropTool {
             }
         }
 
-        // Accumulate angles of strong edges
-        const angleBins = new Float32Array(900); // -45 to +45 in 0.1° steps
+        const angleBins = new Float32Array(900);
         let totalWeight = 0;
 
         for (let y = 2; y < sh - 2; y++) {
@@ -2110,7 +2107,6 @@ class CropTool {
                 if (mag < 30) continue;
 
                 const angle = Math.atan2(gy[i], gx[i]) * 180 / Math.PI;
-
                 let deviation;
                 if (Math.abs(angle) < 45 || Math.abs(angle) > 135) {
                     deviation = angle > 90 ? angle - 180 : (angle < -90 ? angle + 180 : angle);
@@ -2128,30 +2124,43 @@ class CropTool {
             }
         }
 
-        if (totalWeight < 100) return;
-
-        // Smooth histogram
-        const smoothed = new Float32Array(900);
-        for (let i = 5; i < 895; i++) {
-            let sum = 0;
-            for (let j = -5; j <= 5; j++) sum += angleBins[i + j];
-            smoothed[i] = sum;
+        let detectedAngle = 0;
+        if (totalWeight > 100) {
+            const smoothed = new Float32Array(900);
+            for (let i = 5; i < 895; i++) {
+                let sum = 0;
+                for (let j = -5; j <= 5; j++) sum += angleBins[i + j];
+                smoothed[i] = sum;
+            }
+            let peakBin = 450, peakVal = 0;
+            for (let i = 0; i < 900; i++) {
+                if (smoothed[i] > peakVal) { peakVal = smoothed[i]; peakBin = i; }
+            }
+            detectedAngle = (peakBin - 450) / 10;
         }
 
-        let peakBin = 450;
-        let peakVal = 0;
-        for (let i = 0; i < 900; i++) {
-            if (smoothed[i] > peakVal) { peakVal = smoothed[i]; peakBin = i; }
-        }
-
-        const detectedAngle = (peakBin - 450) / 10;
-
-        if (Math.abs(detectedAngle) < 10 && Math.abs(detectedAngle) > 0.2) {
+        // If already rotated, reset to 0. Otherwise apply detected correction.
+        if (Math.abs(this.rotation) > 0.1) {
+            this.rotation = 0;
+        } else if (Math.abs(detectedAngle) > 0.3 && Math.abs(detectedAngle) < 15) {
             this.rotation = -detectedAngle;
-            this._rotSlider.value = this.rotation;
-            this._rotVal.textContent = this.rotation.toFixed(1) + '°';
-            this._drawOverlay();
+        } else {
+            this.rotation = 0;
         }
+
+        this._setRotation(this.rotation);
+    }
+
+    _setRotation(deg) {
+        this.rotation = deg;
+        this._rotSlider.value = deg;
+        this._rotVal.textContent = deg.toFixed(1) + '°';
+        // Sync mobile slider
+        const mRot = document.getElementById('mcrop-rotation');
+        const mAngle = document.getElementById('mcrop-angle');
+        if (mRot) mRot.value = deg;
+        if (mAngle) mAngle.textContent = deg.toFixed(1) + '°';
+        this._drawOverlay();
     }
 
     apply() {
