@@ -1159,6 +1159,21 @@ class App {
     }
 
     _undo() {
+        // If a crop was just applied, undo it by restoring the original image
+        if (this._preCropImage && this.historyIndex <= 1) {
+            this.image = this._preCropImage;
+            this.imageWidth = this._preCropWidth;
+            this.imageHeight = this._preCropHeight;
+            this.glEngine.loadImage(this.image);
+            this._fitCanvas();
+            this._preCropImage = null;
+            this._preCropWidth = null;
+            this._preCropHeight = null;
+            this._hideCompositeOverlay();
+            this._render();
+            this._updateHistoryButtons();
+            return;
+        }
         if (this.historyIndex <= 0) return;
         this.historyIndex--;
         this.state = JSON.parse(this.history[this.historyIndex]);
@@ -2167,6 +2182,11 @@ class CropTool {
 
     apply() {
         if (!this.app.image) return;
+
+        // Store original image for undo
+        this.app._preCropImage = this.app.image;
+        this.app._preCropWidth = this.app.imageWidth;
+        this.app._preCropHeight = this.app.imageHeight;
 
         const iw = this.app.imageWidth;
         const ih = this.app.imageHeight;
