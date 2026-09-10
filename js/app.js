@@ -93,14 +93,18 @@ class App {
             if (panel !== 'masks') this._exitMaskMode();
             if (panel === 'crop') {
                 if (!this.cropTool.active) this.cropTool.activate();
-                // On mobile: hide bottom sheet, show inline crop controls
                 if (window.innerWidth <= 700) {
-                    document.querySelector('.sidebar-right').classList.remove('mobile-open');
+                    // Force hide drawer completely during crop
+                    const sr = document.querySelector('.sidebar-right');
+                    sr.classList.remove('mobile-open');
+                    sr.style.display = 'none';
+                    document.getElementById('mobile-backdrop')?.classList.remove('visible');
                     document.getElementById('mobile-crop-bar')?.classList.add('visible');
                 }
             } else if (this.cropTool && this.cropTool.active) {
                 this.cropTool.deactivate();
                 if (window.innerWidth <= 700) {
+                    document.querySelector('.sidebar-right').style.display = '';
                     document.getElementById('mobile-crop-bar')?.classList.remove('visible');
                 }
             }
@@ -1883,6 +1887,8 @@ class CropTool {
         this.overlay.classList.remove('active');
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
         document.getElementById('mobile-crop-bar')?.classList.remove('visible');
+        // Restore sidebar visibility on mobile
+        document.querySelector('.sidebar-right').style.display = '';
     }
 
     setAspectRatio(ratio) {
