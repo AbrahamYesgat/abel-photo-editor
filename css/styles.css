@@ -458,17 +458,19 @@ html, body {
 /* ===================== Mobile Crop Bar ===================== */
 .mobile-crop-bar {
     display: none;
-    position: absolute;
+    position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 30;
+    z-index: 500;
     pointer-events: none;
     flex-direction: column;
     justify-content: space-between;
-    padding: 8px;
+    padding: 12px;
+    padding-top: calc(50px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(54px + env(safe-area-inset-bottom, 0px));
 }
 
 .mobile-crop-bar.visible {
-    display: flex;
+    display: flex !important;
 }
 
 .mcrop-top, .mcrop-bottom {
