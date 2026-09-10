@@ -2104,7 +2104,7 @@ class CropTool {
             for (let x = 2; x < sw - 2; x++) {
                 const i = y * sw + x;
                 const mag = Math.sqrt(gx[i]*gx[i] + gy[i]*gy[i]);
-                if (mag < 30) continue;
+                if (mag < 15) continue;
 
                 const angle = Math.atan2(gy[i], gx[i]) * 180 / Math.PI;
                 let deviation;
@@ -2125,7 +2125,7 @@ class CropTool {
         }
 
         let detectedAngle = 0;
-        if (totalWeight > 100) {
+        if (totalWeight > 50) {
             const smoothed = new Float32Array(900);
             for (let i = 5; i < 895; i++) {
                 let sum = 0;
@@ -2137,18 +2137,20 @@ class CropTool {
                 if (smoothed[i] > peakVal) { peakVal = smoothed[i]; peakBin = i; }
             }
             detectedAngle = (peakBin - 450) / 10;
-        }
-
-        // If already rotated, reset to 0. Otherwise apply detected correction.
-        if (Math.abs(this.rotation) > 0.1) {
-            this.rotation = 0;
-        } else if (Math.abs(detectedAngle) > 0.3 && Math.abs(detectedAngle) < 15) {
-            this.rotation = -detectedAngle;
+            console.log('[AutoStraighten] edges:', totalWeight.toFixed(0), 'detected tilt:', detectedAngle.toFixed(1) + '°');
         } else {
-            this.rotation = 0;
+            console.log('[AutoStraighten] Not enough edges found:', totalWeight.toFixed(0));
         }
 
-        this._setRotation(this.rotation);
+        // Always apply: if already rotated reset to detected, otherwise apply detected
+        let newRotation;
+        if (Math.abs(detectedAngle) > 0.1 && Math.abs(detectedAngle) < 20) {
+            newRotation = -detectedAngle;
+        } else {
+            newRotation = 0;
+        }
+
+        this._setRotation(newRotation);
     }
 
     _setRotation(deg) {
