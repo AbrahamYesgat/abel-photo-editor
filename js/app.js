@@ -92,7 +92,7 @@ class App {
             document.getElementById(`panel-${panel}`).classList.add('active');
             if (panel !== 'masks') this._exitMaskMode();
             if (panel === 'crop') {
-                this.cropTool.activate();
+                if (!this.cropTool.active) this.cropTool.activate();
             } else if (this.cropTool && this.cropTool.active) {
                 this.cropTool.deactivate();
             }
@@ -717,6 +717,8 @@ class App {
         // Tap on canvas area to close mobile panel
         document.getElementById('canvas-container')?.addEventListener('click', (e) => {
             if (window.innerWidth <= 700 && document.querySelector('.sidebar-right.mobile-open')) {
+                // Don't close panel when crop tool is active (user is interacting with crop overlay)
+                if (this.cropTool && this.cropTool.active) return;
                 if (e.target.id === 'main-canvas' || e.target.closest('.canvas-container')) {
                     closeMobilePanel();
                 }
@@ -730,6 +732,8 @@ class App {
             let startY = 0, currentY = 0, swiping = false;
 
             sidebar.addEventListener('touchstart', (e) => {
+                // Don't allow swipe dismiss during crop
+                if (this.cropTool && this.cropTool.active) { swiping = false; return; }
                 startY = e.touches[0].clientY;
                 swiping = true;
             }, { passive: true });
