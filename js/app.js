@@ -120,9 +120,12 @@ class App {
                 document.querySelectorAll('.mobile-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 switchPanel(panel, null);
-                document.querySelector('.sidebar-right').classList.add('mobile-open');
-                document.getElementById('mobile-backdrop')?.classList.add('visible');
-                setTimeout(() => this._fitCanvas(), 350); // refit after animation
+                // Don't open drawer for crop on mobile — uses floating controls instead
+                if (panel !== 'crop') {
+                    document.querySelector('.sidebar-right').classList.add('mobile-open');
+                    document.getElementById('mobile-backdrop')?.classList.add('visible');
+                    setTimeout(() => this._fitCanvas(), 350);
+                }
             });
         });
     }
