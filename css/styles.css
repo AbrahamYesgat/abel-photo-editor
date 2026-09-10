@@ -455,6 +455,107 @@ html, body {
 
 .crop-actions .btn { flex: 1; justify-content: center; }
 
+/* ===================== Mobile Crop Bar ===================== */
+.mobile-crop-bar {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 30;
+    pointer-events: none;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 8px;
+}
+
+.mobile-crop-bar.visible {
+    display: flex;
+}
+
+.mcrop-top, .mcrop-bottom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    border-radius: 10px;
+    padding: 6px 10px;
+}
+
+.mcrop-ratios {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    flex: 1;
+    scrollbar-width: none;
+}
+
+.mcrop-ratios::-webkit-scrollbar { display: none; }
+
+.mcrop-ratio {
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    font-family: var(--font);
+}
+
+.mcrop-ratio.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(13,153,255,0.15);
+}
+
+.mcrop-btn {
+    padding: 8px 14px;
+    font-size: 16px;
+    color: var(--text-primary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font);
+    border-radius: 8px;
+}
+
+.mcrop-btn:active { background: rgba(255,255,255,0.1); }
+
+.mcrop-apply {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 20px;
+}
+
+.mcrop-slider {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    outline: none;
+}
+
+.mcrop-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: white;
+    border: none;
+}
+
+.mcrop-angle {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-width: 30px;
+    text-align: right;
+    font-family: var(--font);
+}
+
 /* ===================== Drop Zone ===================== */
 .drop-zone {
     position: absolute;

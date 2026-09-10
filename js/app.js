@@ -93,8 +93,16 @@ class App {
             if (panel !== 'masks') this._exitMaskMode();
             if (panel === 'crop') {
                 if (!this.cropTool.active) this.cropTool.activate();
+                // On mobile: hide bottom sheet, show inline crop controls
+                if (window.innerWidth <= 700) {
+                    document.querySelector('.sidebar-right').classList.remove('mobile-open');
+                    document.getElementById('mobile-crop-bar')?.classList.add('visible');
+                }
             } else if (this.cropTool && this.cropTool.active) {
                 this.cropTool.deactivate();
+                if (window.innerWidth <= 700) {
+                    document.getElementById('mobile-crop-bar')?.classList.remove('visible');
+                }
             }
         };
 
@@ -1775,6 +1783,55 @@ class CropTool {
         document.getElementById('crop-cancel').addEventListener('click', () => this.cancel());
         document.getElementById('crop-auto-straighten').addEventListener('click', () => this.autoStraighten());
 
+        // Mobile crop bar buttons
+        document.getElementById('mcrop-apply')?.addEventListener('click', () => this.apply());
+        document.getElementById('mcrop-cancel')?.addEventListener('click', () => this.cancel());
+        document.getElementById('mcrop-auto')?.addEventListener('click', () => this.autoStraighten());
+
+        // Mobile rotation slider
+        const mRot = document.getElementById('mcrop-rotation');
+        const mAngle = document.getElementById('mcrop-angle');
+        if (mRot) {
+            mRot.addEventListener('input', () => {
+                this.rotation = parseFloat(mRot.value);
+                mAngle.textContent = this.rotation.toFixed(1) + '°';
+                this._rotSlider.value = this.rotation;
+                this._rotVal.textContent = this.rotation.toFixed(1) + '°';
+                this._drawOverlay();
+            });
+            mRot.addEventListener('dblclick', () => {
+                mRot.value = 0; this.rotation = 0;
+                mAngle.textContent = '0°';
+                this._rotSlider.value = 0;
+                this._rotVal.textContent = '0°';
+                this._drawOverlay();
+            });
+        }
+
+        // Build mobile ratio buttons
+        const mRatios = document.getElementById('mcrop-ratios');
+        if (mRatios) {
+            const ratios = [
+                { label: 'Free', value: null },
+                { label: '1:1', value: 1 },
+                { label: '4:3', value: 4/3 },
+                { label: '3:2', value: 3/2 },
+                { label: '16:9', value: 16/9 },
+                { label: '9:16', value: 9/16 },
+            ];
+            ratios.forEach(r => {
+                const btn = document.createElement('button');
+                btn.className = 'mcrop-ratio' + (r.value === null ? ' active' : '');
+                btn.textContent = r.label;
+                btn.addEventListener('click', () => {
+                    mRatios.querySelectorAll('.mcrop-ratio').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    this.setAspectRatio(r.value);
+                });
+                mRatios.appendChild(btn);
+            });
+        }
+
         this.overlay.addEventListener('mousedown', (e) => this._onPointerDown(e));
         window.addEventListener('mousemove', (e) => this._onPointerMove(e));
         window.addEventListener('mouseup', () => this._onPointerUp());
@@ -1822,6 +1879,7 @@ class CropTool {
         this.active = false;
         this.overlay.classList.remove('active');
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
+        document.getElementById('mobile-crop-bar')?.classList.remove('visible');
     }
 
     setAspectRatio(ratio) {
@@ -2132,6 +2190,7 @@ class CropTool {
 
         // Clear CSS rotation preview
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
+        document.getElementById('mobile-crop-bar')?.classList.remove('visible');
 
         // Replace the app's source image
         const newImg = new Image();
