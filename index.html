@@ -98,6 +98,7 @@
             <canvas id="main-canvas"></canvas>
             <canvas id="mask-overlay" style="display:none;"></canvas>
             <canvas id="crop-overlay" class="crop-overlay"></canvas>
+            <span id="compare-label" class="compare-label" role="status" hidden>Before</span>
 
             <div class="drop-zone" id="drop-zone" style="cursor:pointer;">
                 <div class="drop-zone-content">
@@ -133,6 +134,7 @@
     <!-- Mobile Bottom Tabs (inside layout, right after canvas) -->
     <nav class="mobile-tabs">
         <div class="mobile-tabs-inner">
+            <button class="mobile-tab" data-panel="review">Review</button>
             <button class="mobile-tab" data-panel="presets">Presets</button>
             <button class="mobile-tab" data-panel="crop">Crop</button>
             <button class="mobile-tab active" data-panel="basic">Basic</button>
@@ -153,6 +155,7 @@
         <div class="sidebar-right-inner">
             <!-- Vertical Tab Icons -->
             <div class="vtabs">
+                <button class="vtab vtab-review" data-panel="review" title="Photo Review" aria-label="Photo Review">AI</button>
                 <button class="vtab" data-panel="crop" title="Crop">✂</button>
                 <button class="vtab active" data-panel="basic" title="Basic">☀</button>
                 <button class="vtab" data-panel="curve" title="Curve">〰</button>
@@ -175,6 +178,93 @@
 
                 <!-- Panel Contents -->
                 <div class="panels-container">
+            <div class="edit-panel" id="panel-review">
+                <div class="review-heading"><h2>Photo review</h2><span id="review-provider-badge">Gemini Cloud</span></div>
+                <p class="review-note">A second pair of eyes, not a verdict. Ratings are subjective. Apply changes only light and color; crop suggestions are advice only.</p>
+                <label class="review-field-label" for="review-provider">Review with</label>
+                <select id="review-provider">
+                    <option value="gemini">Gemini - Google Cloud</option>
+                    <option value="local">Qwen - This computer</option>
+                    <option value="manual">ChatGPT — Manual import</option>
+                </select>
+                <p id="review-provider-note" class="review-note">Cloud reviews send a preview to Google and use your project's API quota.</p>
+                <details id="review-connection" class="review-connection">
+                    <summary id="review-connection-title">Connect Gemini backend</summary>
+                    <div id="review-cloud-settings">
+                    <p class="review-note">The Gemini key belongs on your server, never here. GitHub Pages needs a connected backend: hosted, or your running local companion.</p>
+                    <label for="review-endpoint">Backend URL (blank for this server)</label>
+                    <input id="review-endpoint" type="url" placeholder="https://your-backend.example" autocomplete="off">
+                    <label for="review-token">Backend access token (not a Gemini key)</label>
+                    <input id="review-token" type="password" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div id="review-local-settings" hidden>
+                        <p class="review-note">Run Ollama and the ABEL companion on this computer. The deployed website can connect here too; Qwen runs locally, not on the website's server.</p>
+                        <label for="review-local-endpoint">Local companion URL</label>
+                        <input id="review-local-endpoint" type="url" placeholder="http://127.0.0.1:4178" autocomplete="off">
+                        <label for="review-local-token">Local access token</label>
+                        <input id="review-local-token" type="password" autocomplete="off" spellcheck="false">
+                        <p class="review-note">The deployed website requires your companion's local access token and an allowed origin. Your browser may ask for local-network permission. On a phone, localhost means the phone, not your computer.</p>
+                    </div>
+                    <p class="review-note">Connection details stay in memory for this tab only.</p>
+                </details>
+                <button id="review-check-local" class="btn btn-outline" hidden>Check local connection</button>
+                <label class="review-field-label" for="review-intent">What are you going for?</label>
+                <textarea id="review-intent" rows="2" maxlength="600" placeholder="Natural colors, moody portrait, warm sunset..."></textarea>
+                <label id="review-consent-label" class="review-consent">
+                    <input id="review-consent" type="checkbox">
+                    <span><span id="review-consent-text">Send a reduced photo preview and my editing intent to the connected server and Google. Free-tier content may be used to improve Google's products.</span> <a id="review-data-terms" href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer">Data terms</a></span>
+                </label>
+                <div class="review-request-actions">
+                    <button id="review-analyze" class="btn btn-accent" disabled>Review photo</button>
+                    <button id="review-cancel" class="btn btn-outline" hidden>Cancel</button>
+                </div>
+                <section id="review-manual" hidden aria-label="Manual ChatGPT review">
+                    <ol class="review-manual-steps">
+                        <li>Set your intent above, then <strong>Export for ChatGPT</strong>. This downloads the current rendered JPEG (up to 1280 px, without original EXIF).</li>
+                        <li>Open ChatGPT yourself. Attach this JPEG and copy the complete prompt below, or attach its downloaded text file. Ask for the JSON review, not a generated image.</li>
+                        <li>Paste the complete JSON response here and import. Choose Global or Adaptive and inspect strength before Apply. Import never changes the photo.</li>
+                    </ol>
+                    <p class="review-note">Your existing ChatGPT account may support this; image/file uploads and messages depend on your plan, model and current limits. A subscription is not unlimited and does not include API credits. ABEL does not connect to your account or upload anything. Only your manual upload shares data with ChatGPT, under its privacy settings and terms.</p>
+                    <p class="review-note">Works on the static website and locally, including phones, without an ABEL backend. Keep this tab and edit unchanged while waiting. Changing the photo, sliders, curves, masks, intent or provider requires a fresh export. Refreshing also requires re-export. Use only the response for the matching files; ABEL cannot verify which photo ChatGPT reviewed.</p>
+                    <div class="review-request-actions">
+                        <button id="review-export" class="btn btn-accent" disabled>Export for ChatGPT</button>
+                        <button id="review-download-preview" class="btn btn-outline" disabled>Download preview again</button>
+                    </div>
+                    <label class="review-field-label" for="review-prompt">Complete prompt, current sliders and JSON schema</label>
+                    <textarea id="review-prompt" rows="5" readonly spellcheck="false" autocomplete="off" placeholder="Export to prepare the matching prompt."></textarea>
+                    <div class="review-request-actions">
+                        <button id="review-copy-prompt" class="btn btn-outline" disabled>Copy prompt</button>
+                        <button id="review-download-prompt" class="btn btn-outline" disabled>Download prompt</button>
+                    </div>
+                    <label class="review-field-label" for="review-paste">Paste ChatGPT's complete JSON response</label>
+                    <textarea id="review-paste" rows="6" maxlength="262144" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="review-paste-help" placeholder='{"rating": …, "summary": …, …}' disabled></textarea>
+                    <p id="review-paste-help" class="review-note">Maximum 256 KiB. JSON only, optionally in one complete JSON code fence. All required fields and bounds are checked. If invalid, ask ChatGPT to correct the full response using the same prompt, then retry without changing this edit.</p>
+                    <button id="review-import" class="btn btn-accent" disabled>Import review JSON</button>
+                </section>
+                <p id="review-status" class="review-status" role="status" aria-live="polite">Import a photo to get started.</p>
+                <div id="review-result" hidden>
+                    <div id="review-feedback"></div>
+                    <h3>Optional edit alternatives</h3>
+                    <label class="review-field-label" for="review-alternative">Choose one, from the same current edit</label>
+                    <select id="review-alternative">
+                        <option value="">Select an alternative…</option>
+                        <option value="global">Global — whole-image light and color</option>
+                        <option value="adaptive">Adaptive — global base + soft regions</option>
+                    </select>
+                    <p class="review-note">Global targets are absolute. Adaptive adds up to 3 editable soft radial/linear masks with regional offsets, preserving existing masks. Approximate placement, not precise subject segmentation; spill and overlap are possible. Nothing is applied until you click Apply.</p>
+                    <div id="review-adjustments"></div>
+                </div>
+                <div id="review-apply-bar" class="review-apply-bar" hidden>
+                    <label for="review-strength">Adjustment strength <output id="review-strength-value">100%</output></label>
+                    <input id="review-strength" type="range" class="slider-input" min="0" max="100" step="5" value="100">
+                    <div class="review-request-actions">
+                        <button id="review-apply" class="btn btn-accent" disabled>Apply changes</button>
+                        <button id="review-undo" class="btn btn-outline" disabled>Undo review</button>
+                    </div>
+                    <button id="review-compare" class="btn btn-outline" disabled>Hold to see before review</button>
+                </div>
+                <p class="review-note">Touch and hold the photo to compare. Release to return to your edit.</p>
+            </div>
             <div class="edit-panel" id="panel-presets">
                 <div id="presets-list-mobile" class="presets-grid"></div>
             </div>
@@ -350,6 +440,11 @@
 <script src="js/mask-engine.js"></script>
 <script src="js/auto-edit.js"></script>
 <script src="js/presets.js"></script>
+<script src="js/review-contract.js"></script>
+<script src="js/review-prompt.js"></script>
+<script src="js/review-json.js"></script>
+<script src="js/review-manual.js"></script>
+<script src="js/review.js"></script>
 <script src="js/app.js"></script>
 
 <script>

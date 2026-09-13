@@ -665,6 +665,100 @@ html, body {
 
 .edit-panel.active { display: block; }
 
+/* Review shares the panel scroller; its actions stay reachable on short screens. */
+.review-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.review-heading h2 { font-size: 18px; font-weight: 600; }
+.review-heading > span {
+    font-size: 10px;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border-radius: 12px;
+    padding: 4px 8px;
+}
+#panel-review { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+#panel-review [hidden], #compare-label[hidden] { display: none !important; }
+#panel-review h3 { font-size: 12px; margin: 18px 0 6px; color: var(--text-bright); }
+#panel-review p { margin-bottom: 10px; }
+#panel-review ul { padding-left: 18px; }
+#panel-review li { margin-bottom: 6px; }
+#panel-review a { color: var(--accent); text-decoration: underline; }
+.review-note { color: var(--text-secondary); font-size: 11px; }
+.review-connection {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 14px 0;
+}
+.review-connection summary { cursor: pointer; color: var(--text-primary); }
+.review-connection label, .review-field-label { display: block; margin: 10px 0 5px; }
+#panel-review input[type="url"],
+#panel-review input[type="password"],
+#panel-review select,
+#panel-review textarea {
+    width: 100%;
+    padding: 8px;
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+}
+#panel-review textarea { resize: vertical; min-height: 64px; max-height: 180px; }
+.review-consent { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; font-size: 11px; }
+.review-consent input { flex-shrink: 0; margin-top: 4px; width: 16px; height: 16px; }
+.review-request-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.review-manual-steps { padding-left: 20px; margin: 12px 0; }
+.review-manual-steps li { margin: 8px 0; }
+#review-prompt, #review-paste { font-family: monospace; overflow-wrap: anywhere; }
+#review-manual button { min-height: 44px; white-space: normal; }
+.review-status { color: var(--accent); padding: 8px 0; }
+.review-status.review-error { color: var(--danger); }
+.review-rating { font-size: 30px; font-weight: 600; color: var(--text-bright); margin-top: 14px; }
+.review-adjustment { border-bottom: 1px solid var(--border); padding: 10px 0; }
+.review-adjustment strong { overflow-wrap: anywhere; }
+#review-alternative { width: 100%; min-height: 44px; margin-bottom: 8px; }
+.review-adjustment > span { float: right; font-variant-numeric: tabular-nums; }
+.review-adjustment p { clear: both; color: var(--text-secondary); font-size: 11px; }
+.review-apply-bar {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    padding: 12px 0 6px;
+    margin-top: 12px;
+    z-index: 2;
+}
+.review-apply-bar label { display: flex; justify-content: space-between; margin-bottom: 10px; }
+#review-compare { width: 100%; touch-action: none; user-select: none; -webkit-touch-callout: none; }
+#panel-review button { min-height: 36px; }
+.vtab-review { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.compare-label {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 20;
+    white-space: nowrap;
+}
+#main-canvas { touch-action: none; user-select: none; -webkit-touch-callout: none; }
+.sidebar-right-inner, .vpanel-area, .panels-container { min-height: 0; }
+.panels-container { overscroll-behavior: contain; }
+@media (max-height: 600px) {
+    .review-apply-bar { position: static; }
+}
+
 .panel-separator {
     height: 1px;
     background: var(--border);
@@ -1277,6 +1371,10 @@ html, body {
         overflow: hidden;
     }
 
+    .editor-layout:has(.sidebar-right.mobile-open #panel-review.active) .canvas-area {
+        margin-bottom: min(50vh, 350px);
+    }
+
     #main-canvas {
         display: block;
     }
@@ -1355,7 +1453,7 @@ html, body {
 
     .sidebar-right .sidebar-right-inner {
         flex-direction: column;
-        height: 100%;
+        min-height: 0;
     }
 
     /* Hide vertical tabs on mobile */
@@ -1388,6 +1486,11 @@ html, body {
     }
 
     .edit-panel { padding: 8px 16px; }
+    #panel-review input[type="url"],
+    #panel-review input[type="password"],
+    #panel-review select,
+    #panel-review textarea { font-size: 16px; }
+    #panel-review button { min-height: 42px; }
 
     /* Slider touch targets bigger */
     .slider-input { height: 6px; }

@@ -1,0 +1,11 @@
+{
+  "name": "abel-photo-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local-first photo editor with an optional Gemini critique backend",
+  "engines": { "node": ">=20.17.0" },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test"
+  }
+}

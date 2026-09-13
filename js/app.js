@@ -19,6 +19,7 @@ class App {
 
         this._initUI();
         this._bindEvents();
+        this.review = new ReviewPanel(this);
     }
 
     _defaultState() {
@@ -80,6 +81,7 @@ class App {
 
         // Panel tab switching (vertical tabs + old horizontal tabs for compatibility)
         const switchPanel = (panel, clickedTab) => {
+            this._stopComparison();
             // Update vtabs
             document.querySelectorAll('.vtab').forEach(t => t.classList.remove('active'));
             // Update panel-tabs (mobile compat)
@@ -420,7 +422,7 @@ class App {
 
         const invertBtn = this._btn('Invert Mask', () => {
             const mask = this.maskEngine.getActiveMask();
-            if (mask) { mask.inverted = !mask.inverted; this._render(); }
+            if (mask) { this._pushHistory(); mask.inverted = !mask.inverted; this._render(); this._pushHistory(); }
         });
         invertBtn.className = 'btn btn-small';
         brushSettings.appendChild(invertBtn);
@@ -451,7 +453,7 @@ class App {
 
         const wandInvertBtn = this._btn('Invert Mask', () => {
             const mask = this.maskEngine.getActiveMask();
-            if (mask) { mask.inverted = !mask.inverted; this._render(); }
+            if (mask) { this._pushHistory(); mask.inverted = !mask.inverted; this._render(); this._pushHistory(); }
         });
         wandInvertBtn.className = 'btn btn-sm btn-outline';
         wandSettings.appendChild(wandInvertBtn);
@@ -472,6 +474,11 @@ class App {
         const maskTitle = document.createElement('h4');
         maskTitle.textContent = 'Mask Adjustments';
         maskAdj.appendChild(maskTitle);
+        const reviewReason = document.createElement('p');
+        reviewReason.id = 'mask-review-reason';
+        reviewReason.className = 'panel-info';
+        reviewReason.hidden = true;
+        maskAdj.appendChild(reviewReason);
 
         const maskSliders = [
             ['Exposure', 'mask_exposure', -5, 5, 0.01, 0],
@@ -489,10 +496,12 @@ class App {
         // Delete mask button
         const deleteBtn = this._btn('🗑️ Delete Mask', () => {
             if (this.maskEngine.activeMaskIndex >= 0) {
+                this._pushHistory();
                 this.maskEngine.deleteMask(this.maskEngine.activeMaskIndex);
                 this._updateMaskList();
                 if (this.maskEngine.masks.length === 0) this._exitMaskMode();
                 this._render();
+                this._pushHistory();
             }
         });
         deleteBtn.className = 'btn btn-small btn-danger';
@@ -525,7 +534,10 @@ class App {
 
     _addMask(type) {
         if (!this.image) return;
+        this._pushHistory();
         this.maskEngine.createMask(type);
+        this.review?.invalidate('Mask changed. Request a fresh review when finished.');
+        this._pushHistory();
         this.maskMode = true;
         this.showMaskOverlay = true;
         this._updateMaskList();
@@ -566,9 +578,11 @@ class App {
         this.maskEngine.masks.forEach((mask, i) => {
             const item = document.createElement('div');
             item.className = `mask-item ${i === this.maskEngine.activeMaskIndex ? 'active' : ''}`;
-            item.textContent = `${mask.type.charAt(0).toUpperCase() + mask.type.slice(1)} Mask ${i + 1}`;
+            item.textContent = mask.name || `${mask.type.charAt(0).toUpperCase() + mask.type.slice(1)} Mask ${i + 1}`;
+            if (mask.reason) item.title = mask.reason;
             item.addEventListener('click', () => {
                 this.maskEngine.activeMaskIndex = i;
+                this.maskEngine.tool = mask.type;
                 this.maskMode = true;
                 this.showMaskOverlay = true;
                 this._updateMaskList();
@@ -589,6 +603,12 @@ class App {
 
     _syncMaskSliders() {
         const mask = this.maskEngine.getActiveMask();
+        const reason = document.getElementById('mask-review-reason');
+        if (reason) {
+            reason.hidden = !mask?.reason;
+            reason.textContent = mask?.reason
+                ? `${mask.name || 'Adaptive region'}: ${mask.reason} Soft approximation; drag to redraw or adjust the sliders below.` : '';
+        }
         const adj = mask ? mask.adjustments : {};
         const maskKeys = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation', 'clarity'];
         for (const key of maskKeys) {
@@ -674,14 +694,15 @@ class App {
 
         // Before/After
         const baBtn = document.getElementById('btn-before-after');
-        baBtn.addEventListener('mousedown', () => { this.showingOriginal = true; this._render(); });
-        baBtn.addEventListener('mouseup', () => { this.showingOriginal = false; this._render(); });
-        baBtn.addEventListener('mouseleave', () => { if (this.showingOriginal) { this.showingOriginal = false; this._render(); } });
-        baBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.showingOriginal = true; this._render(); });
-        baBtn.addEventListener('touchend', () => { this.showingOriginal = false; this._render(); });
+        this._bindHoldCompare(baBtn);
 
         // Canvas interactions (for masks)
         const canvas = document.getElementById('main-canvas');
+        this._bindHoldCompare(canvas, true, true);
+        window.addEventListener('blur', () => this._stopComparison());
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this._stopComparison();
+        });
         canvas.addEventListener('mousedown', (e) => this._canvasPointerDown(e));
         canvas.addEventListener('mousemove', (e) => this._canvasPointerMove(e));
         canvas.addEventListener('mouseup', () => this._canvasPointerUp());
@@ -702,15 +723,16 @@ class App {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            if (e.target.closest('textarea, select, input:not([type="range"]):not([type="checkbox"]), [contenteditable="true"]')) return;
             if (e.ctrlKey || e.metaKey) {
                 if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); this._undo(); }
                 if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); this._redo(); }
                 if (e.key === 'e') { e.preventDefault(); this._showExportModal(); }
             }
-            if (e.key === '\\') { this.showingOriginal = true; this._render(); }
+            if (e.key === '\\' && !e.repeat) this._startComparison(false);
         });
         document.addEventListener('keyup', (e) => {
-            if (e.key === '\\') { this.showingOriginal = false; this._render(); }
+            if (e.key === '\\') this._stopComparison();
         });
 
         // Close mobile panel
@@ -731,6 +753,7 @@ class App {
 
         // Tap on canvas area to close mobile panel
         document.getElementById('canvas-container')?.addEventListener('click', (e) => {
+            if (Date.now() < (this._suppressCanvasClickUntil || 0)) return;
             if (window.innerWidth <= 700 && document.querySelector('.sidebar-right.mobile-open')) {
                 // Don't close panel when crop tool is active (user is interacting with crop overlay)
                 if (this.cropTool && this.cropTool.active) return;
@@ -749,7 +772,14 @@ class App {
             sidebar.addEventListener('touchstart', (e) => {
                 // Don't allow swipe dismiss during crop
                 if (this.cropTool && this.cropTool.active) { swiping = false; return; }
+                // Only the sheet handle can dismiss; content must remain scrollable.
+                if (e.touches.length !== 1 || e.touches[0].clientY - sidebar.getBoundingClientRect().top > 24 ||
+                    e.target.closest('button, input, textarea, select, a, summary')) {
+                    swiping = false;
+                    return;
+                }
                 startY = e.touches[0].clientY;
+                currentY = startY;
                 swiping = true;
             }, { passive: true });
 
@@ -773,6 +803,11 @@ class App {
                 }
                 sidebar.style.transform = '';
             });
+            sidebar.addEventListener('touchcancel', () => {
+                swiping = false;
+                sidebar.style.transition = '';
+                sidebar.style.transform = '';
+            });
         })();
 
         // Resizable sidebar
@@ -786,6 +821,94 @@ class App {
 
         // Window resize
         window.addEventListener('resize', () => this._fitCanvas());
+    }
+
+    _bindHoldCompare(element, delayed = false, preferReview = false) {
+        let timer = null;
+        let pointer = null;
+        let startX = 0, startY = 0;
+        let active = false;
+        const cleanup = () => {
+            clearTimeout(timer);
+            timer = null;
+            pointer = null;
+            if (active && delayed) this._suppressCanvasClickUntil = Date.now() + 600;
+            active = false;
+        };
+        this._comparisonStops ??= new Set();
+        this._comparisonStops.add(cleanup);
+        const end = () => {
+            const wasActive = active;
+            cleanup();
+            if (wasActive) this._stopComparison();
+        };
+        element.addEventListener('pointerdown', event => {
+            if (!event.isPrimary) { end(); return; }
+            if (event.button !== 0 || !this.image || element.disabled ||
+                (delayed && (this.maskMode || this.cropTool?.active))) return;
+            this._stopComparison();
+            pointer = event.pointerId;
+            startX = event.clientX;
+            startY = event.clientY;
+            const start = () => {
+                timer = null;
+                if (pointer === null || (delayed && (this.maskMode || this.cropTool?.active))) return;
+                active = true;
+                this._startComparison(preferReview);
+            };
+            if (delayed) timer = setTimeout(start, 350);
+            else { event.preventDefault(); start(); }
+        });
+        window.addEventListener('pointerdown', event => {
+            if (pointer !== null && event.pointerId !== pointer) end();
+        });
+        window.addEventListener('pointermove', event => {
+            if (event.pointerId === pointer && Math.hypot(event.clientX - startX, event.clientY - startY) > 12) end();
+        });
+        window.addEventListener('pointerup', end);
+        window.addEventListener('pointercancel', end);
+        element.addEventListener('lostpointercapture', end);
+        element.addEventListener('contextmenu', event => {
+            if (this.image) event.preventDefault();
+        });
+        if (!delayed) {
+            element.addEventListener('keydown', event => {
+                if ([' ', 'Enter'].includes(event.key) && !event.repeat) {
+                    event.preventDefault();
+                    active = true;
+                    this._startComparison(preferReview);
+                }
+            });
+            element.addEventListener('keyup', event => {
+                if ([' ', 'Enter'].includes(event.key)) { event.preventDefault(); end(); }
+            });
+            element.addEventListener('blur', end);
+        }
+    }
+
+    _startComparison(preferReview) {
+        if (!this.image) return;
+        this._comparisonState = preferReview && this.review?.canCompare() ? this.review.beforeState : null;
+        this._comparisonMasks = this._comparisonState ? this.review.beforeMasks : null;
+        this.showingOriginal = !this._comparisonState;
+        const label = document.getElementById('compare-label');
+        label.textContent = this._comparisonState ? 'Before review' : 'Original lighting and color';
+        label.hidden = false;
+        document.getElementById('mask-overlay').style.display = 'none';
+        this._render();
+    }
+
+    _stopComparison() {
+        this._comparisonStops?.forEach(stop => stop());
+        const wasActive = this.showingOriginal || this._comparisonState;
+        this.showingOriginal = false;
+        this._comparisonState = null;
+        this._comparisonMasks = null;
+        document.getElementById('compare-label').hidden = true;
+        if (wasActive) {
+            this._render();
+            if (this.maskMode && this.showMaskOverlay) this._renderMaskOverlay();
+        }
     }
 
     _canvasToImage(e) {
@@ -803,6 +926,8 @@ class App {
 
     _canvasPointerDown(e) {
         if (!this.maskMode || !this.image) return;
+        this.review?.invalidate('Mask changed. Request a fresh review when finished.');
+        this._pushHistory();
         const pos = this._canvasToImage(e);
         this.maskEngine.handlePointerDown(pos.canvasX, pos.canvasY, pos.imgX, pos.imgY, e.shiftKey);
         // For wand: immediately render after click
@@ -857,6 +982,8 @@ class App {
     // ======================== File I/O ========================
 
     _loadFile(file) {
+        this._stopComparison();
+        this.review?.invalidate('Loading a new photo. Review it once it is ready.');
         // Store original filename for export
         this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
 
@@ -972,13 +1099,14 @@ class App {
 
     _render() {
         if (!this.image || !this.glEngine) return;
+        this.review?.onRender();
 
-        const adj = { ...this.state, showOriginal: this.showingOriginal };
+        const adj = { ...(this._comparisonState || this.state), showOriginal: this.showingOriginal };
         const lut = this.curveEditor.getLUT();
         this.glEngine.updateCurveLUT(lut);
 
         // Collect masks with non-zero adjustments
-        const masksWithAdj = this.maskEngine.masks.filter(m =>
+        const masksWithAdj = (this._comparisonMasks || this.maskEngine.masks).filter(m =>
             m.visible && Object.values(m.adjustments).some(v => v !== 0)
         );
 
@@ -1010,6 +1138,8 @@ class App {
         resultCanvas.height = rh;
         const rCtx = resultCanvas.getContext('2d');
         rCtx.drawImage(glCanvas, 0, 0);
+        const baseData = masksWithAdj.some(mask => mask.blend === 'additive')
+            ? rCtx.getImageData(0, 0, rw, rh).data : null;
 
         // For each mask: render with global+mask adjustments merged, then composite
         for (const mask of masksWithAdj) {
@@ -1044,6 +1174,19 @@ class App {
             const layerData = lCtx.getImageData(0, 0, rw, rh);
             const maskData = mCtx.getImageData(0, 0, rw, rh).data;
             const ld = layerData.data;
+            if (mask.blend === 'additive') {
+                // Add only this region's rendered difference; don't replace earlier masks.
+                const composite = rCtx.getImageData(0, 0, rw, rh);
+                for (let i = 0; i < rw * rh; i++) {
+                    const weight = maskData[i * 4] / 255;
+                    for (let c = 0; c < 3; c++) {
+                        const index = i * 4 + c;
+                        composite.data[index] += (ld[index] - baseData[index]) * weight;
+                    }
+                }
+                rCtx.putImageData(composite, 0, 0);
+                continue;
+            }
             for (let i = 0; i < rw * rh; i++) {
                 ld[i * 4 + 3] = maskData[i * 4]; // mask R channel → alpha
             }
@@ -1086,6 +1229,12 @@ class App {
         if (overlay) overlay.style.display = 'none';
     }
 
+    _renderedCanvas() {
+        const composite = document.getElementById('composite-overlay');
+        return composite && composite.style.display !== 'none'
+            ? composite : document.getElementById('main-canvas');
+    }
+
     _invertMaskCanvas(canvas) {
         const w = canvas.width, h = canvas.height;
         const tmp = document.createElement('canvas');
@@ -1115,7 +1264,7 @@ class App {
                 tmp.width = sw;
                 tmp.height = sh;
                 const ctx = tmp.getContext('2d');
-                ctx.drawImage(document.getElementById('main-canvas'), 0, 0, sw, sh);
+                ctx.drawImage(this._renderedCanvas(), 0, 0, sw, sh);
                 const imgData = ctx.getImageData(0, 0, sw, sh);
                 this.histogram.update(imgData);
             } catch (e) { /* ignore */ }
@@ -1143,10 +1292,13 @@ class App {
 
     // ======================== History ========================
 
-    _pushHistory() {
-        const snap = JSON.stringify(this.state);
+    _pushHistory(force = false) {
+        const signature = JSON.stringify({
+            size: [this.imageWidth, this.imageHeight], state: this.state, masks: this.maskEngine.describeMasks()
+        });
         // Don't push if same as current
-        if (this.historyIndex >= 0 && this.history[this.historyIndex] === snap) return;
+        if (!force && this.historyIndex >= 0 && this.history[this.historyIndex].signature === signature) return;
+        const snap = { signature, state: JSON.stringify(this.state), masks: this.maskEngine.captureMasks() };
 
         this.history = this.history.slice(0, this.historyIndex + 1);
         this.history.push(snap);
@@ -1156,14 +1308,28 @@ class App {
         if (this.history.length > 100) {
             this.history.shift();
             this.historyIndex--;
+            if (this._preCropImage) this._preCropHistoryIndex = Math.max(0, this._preCropHistoryIndex - 1);
         }
 
         this._updateHistoryButtons();
     }
 
+    _restoreHistory() {
+        const snapshot = this.history[this.historyIndex];
+        this.state = JSON.parse(snapshot.state);
+        this.maskEngine.restoreMasks(snapshot.masks);
+        this._exitMaskMode();
+        this._updateMaskList();
+        this._syncMaskSliders();
+        this._syncSlidersFromState();
+    }
+
     _undo() {
+        this._stopComparison();
+        clearTimeout(this._historyDebounce);
+        this._pushHistory();
         // If a crop was just applied, undo it by restoring the original image
-        if (this._preCropImage) {
+        if (this._preCropImage && this.historyIndex <= this._preCropHistoryIndex) {
             this.image = this._preCropImage;
             this.imageWidth = this._preCropWidth;
             this.imageHeight = this._preCropHeight;
@@ -1172,6 +1338,12 @@ class App {
             this._preCropImage = null;
             this._preCropWidth = null;
             this._preCropHeight = null;
+            this._preCropHistoryIndex = null;
+            // Crop redo is not supported; discard edits based on the cropped image.
+            this.history = this.history.slice(0, this.historyIndex + 1);
+            if (this._preCropSnapshot) this.history[this.historyIndex] = this._preCropSnapshot;
+            this._preCropSnapshot = null;
+            this._restoreHistory();
             this._hideCompositeOverlay();
             this._render();
             this._updateHistoryButtons();
@@ -1179,23 +1351,24 @@ class App {
         }
         if (this.historyIndex <= 0) return;
         this.historyIndex--;
-        this.state = JSON.parse(this.history[this.historyIndex]);
-        this._syncSlidersFromState();
+        this._restoreHistory();
         this._render();
         this._updateHistoryButtons();
     }
 
     _redo() {
+        this._stopComparison();
+        clearTimeout(this._historyDebounce);
+        this._pushHistory();
         if (this.historyIndex >= this.history.length - 1) return;
         this.historyIndex++;
-        this.state = JSON.parse(this.history[this.historyIndex]);
-        this._syncSlidersFromState();
+        this._restoreHistory();
         this._render();
         this._updateHistoryButtons();
     }
 
     _updateHistoryButtons() {
-        document.getElementById('btn-undo').disabled = this.historyIndex <= 0;
+        document.getElementById('btn-undo').disabled = this.historyIndex <= 0 && !this._preCropImage;
         document.getElementById('btn-redo').disabled = this.historyIndex >= this.history.length - 1;
     }
 
@@ -1218,6 +1391,14 @@ class App {
     // ======================== Actions ========================
 
     _reset() {
+        this._stopComparison();
+        this.review?.invalidate('Ready for a fresh review of your photo.');
+        clearTimeout(this._historyDebounce);
+        this._preCropImage = null;
+        this._preCropWidth = null;
+        this._preCropHeight = null;
+        this._preCropHistoryIndex = null;
+        this._preCropSnapshot = null;
         this.state = this._defaultState();
         this.maskEngine.masks = [];
         this.maskEngine.activeMaskIndex = -1;
@@ -1225,8 +1406,9 @@ class App {
         this.curveEditor.reset();
 
         this._syncSlidersFromState();
-        this.history = [JSON.stringify(this.state)];
-        this.historyIndex = 0;
+        this.history = [];
+        this.historyIndex = -1;
+        this._pushHistory();
         this._updateHistoryButtons();
         this._updateMaskList();
 
@@ -1403,6 +1585,7 @@ class App {
             const newMask = this.maskEngine.getActiveMask();
             if (newMask) {
                 newMask.ctx.drawImage(maskCanvas, 0, 0, newMask.canvas.width, newMask.canvas.height);
+                this.maskEngine.touch(newMask);
             }
 
             // Enter mask editing mode
@@ -1519,6 +1702,7 @@ class App {
 
     _doExport() {
         if (this._exporting) return;
+        this._stopComparison();
         this._exporting = true;
         const btn = document.getElementById('export-confirm');
         btn.disabled = true;
@@ -1550,10 +1734,10 @@ class App {
             this._aiUpscaleExport(scale, mimeType, quality, onBlob, btn);
         } else if (scale === 1) {
             this._render();
-            document.getElementById('main-canvas').toBlob(onBlob, mimeType, quality);
+            this._renderedCanvas().toBlob(onBlob, mimeType, quality);
         } else {
             this._render();
-            const srcCanvas = document.getElementById('main-canvas');
+            const srcCanvas = this._renderedCanvas();
             const outW = Math.round(this.imageWidth * scale);
             const outH = Math.round(this.imageHeight * scale);
             const outCanvas = document.createElement('canvas');
@@ -1589,7 +1773,8 @@ class App {
             console.log('[AI Upscale] Step 3: Pipeline ready');
 
             this._render();
-            const srcCanvas = document.getElementById('main-canvas');
+            this._stopComparison();
+            const srcCanvas = this._renderedCanvas();
 
             // Downsize for model (max ~800px per side)
             const maxModelInput = 800;
@@ -1689,8 +1874,9 @@ class App {
             console.error('AI upscale full error:', e);
             const msg = (e && e.message) ? e.message : String(e);
             alert('AI upscaling failed: ' + msg + '\nFalling back to bicubic. Check browser console for details.');
+            this._stopComparison();
             this._render();
-            const srcCanvas = document.getElementById('main-canvas');
+            const srcCanvas = this._renderedCanvas();
             const outW = Math.round(this.imageWidth * scale);
             const outH = Math.round(this.imageHeight * scale);
             const outCanvas = document.createElement('canvas');
@@ -2187,6 +2373,12 @@ class CropTool {
         if (!this.app.image) return;
 
         // Store original image for undo
+        this.app._stopComparison();
+        this.app.review?.invalidate('Crop changed. Request a fresh review after cropping.');
+        clearTimeout(this.app._historyDebounce);
+        this.app._pushHistory();
+        this.app._preCropHistoryIndex = this.app.historyIndex;
+        this.app._preCropSnapshot = this.app.history[this.app.historyIndex];
         this.app._preCropImage = this.app.image;
         this.app._preCropWidth = this.app.imageWidth;
         this.app._preCropHeight = this.app.imageHeight;
@@ -2244,13 +2436,17 @@ class CropTool {
             this.app.glEngine.loadImage(newImg);
             this.app._fitCanvas();
             this.app._hideCompositeOverlay();
-            this.app._render();
-            this.app._pushHistory();
 
             // Clear masks since dimensions changed
             this.app.maskEngine.masks = [];
             this.app.maskEngine.activeMaskIndex = -1;
             this.app._updateMaskList();
+            // Keep a cropped baseline at the crop boundary, not a mask-only undo step.
+            this.app.history = this.app.history.slice(0, this.app._preCropHistoryIndex);
+            this.app.historyIndex = this.app.history.length - 1;
+            this.app._pushHistory(true);
+            this.app._render();
+            this.app._updateHistoryButtons();
 
             this.deactivate();
         };
@@ -2561,6 +2757,7 @@ class Library {
                 inverted: m.inverted,
                 adjustments: { ...m.adjustments },
                 visible: m.visible,
+                name: m.name, reason: m.reason, blend: m.blend, params: m.params,
                 canvasData: m.canvas.toDataURL('image/png'),
             })),
             timestamp: Date.now(),
@@ -2633,12 +2830,17 @@ class Library {
                         mask.adjustments = { ...mask.adjustments, ...savedMask.adjustments };
                         mask.inverted = savedMask.inverted;
                         mask.visible = savedMask.visible;
+                        mask.name = savedMask.name;
+                        mask.reason = savedMask.reason;
+                        mask.blend = savedMask.blend === 'additive' ? 'additive' : undefined;
+                        mask.params = savedMask.params;
 
                         // Restore the mask canvas image data
                         if (savedMask.canvasData) {
                             const img = new Image();
                             img.onload = () => {
                                 mask.ctx.drawImage(img, 0, 0, mask.canvas.width, mask.canvas.height);
+                                this.app.maskEngine.touch(mask);
                                 resolve();
                             };
                             img.onerror = () => resolve();
@@ -2655,6 +2857,7 @@ class Library {
             this.app._updateMaskList();
             this.app._syncMaskSliders();
             this.app._hideCompositeOverlay();
+            this.app._pushHistory();
             this.app._render();
         }
     }

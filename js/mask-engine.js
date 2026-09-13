@@ -17,6 +17,78 @@ class MaskEngine {
         this._startPos = null;
         this._endPos = null;
         this._creating = false;
+        this._nextMaskId = 0;
+        this._snapshots = new WeakMap();
+    }
+
+    touch(mask) {
+        mask.revision = (mask.revision || 0) + 1;
+    }
+
+    describeMasks() {
+        return this.masks.map(mask => {
+            mask.id ??= ++this._nextMaskId;
+            return {
+                id: mask.id, revision: mask.revision || 0,
+                size: [mask.canvas.width, mask.canvas.height],
+                type: mask.type, visible: mask.visible, inverted: mask.inverted,
+                adjustments: { ...mask.adjustments }, params: mask.params,
+                name: mask.name, reason: mask.reason, blend: mask.blend
+            };
+        });
+    }
+
+    captureMasks() {
+        const descriptions = this.describeMasks();
+        return this.masks.map((mask, i) => {
+            let cached = this._snapshots.get(mask);
+            if (!cached || cached.revision !== descriptions[i].revision) {
+                const canvas = document.createElement('canvas');
+                canvas.width = mask.canvas.width;
+                canvas.height = mask.canvas.height;
+                canvas.getContext('2d').drawImage(mask.canvas, 0, 0);
+                cached = { revision: descriptions[i].revision, canvas };
+                this._snapshots.set(mask, cached);
+            }
+            // Unchanged mask pixels are shared across slider-only history entries.
+            return { ...JSON.parse(JSON.stringify(descriptions[i])), canvas: cached.canvas };
+        });
+    }
+
+    restoreMasks(snapshots) {
+        this.masks = snapshots.map(saved => {
+            const { canvas: source, ...metadata } = saved;
+            const canvas = document.createElement('canvas');
+            canvas.width = source.width;
+            canvas.height = source.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(source, 0, 0);
+            const mask = { ...JSON.parse(JSON.stringify(metadata)), canvas, ctx };
+            this._snapshots.set(mask, { revision: mask.revision, canvas: source });
+            return mask;
+        });
+        this.activeMaskIndex = this.masks.length ? Math.min(Math.max(0, this.activeMaskIndex), this.masks.length - 1) : -1;
+        this.tool = this.getActiveMask()?.type || 'brush';
+    }
+
+    buildReviewMasks(regions) {
+        // Stage on a separate engine: a failed allocation cannot partially change the edit.
+        const staging = new MaskEngine(this.app);
+        staging._nextMaskId = this._nextMaskId;
+        for (const region of regions) {
+            const g = region.geometry;
+            const mask = staging.createMask(g.type);
+            if (!mask) throw new Error('No photo available for adaptive masks.');
+            const w = mask.canvas.width, h = mask.canvas.height;
+            if (g.type === 'radial') staging.createRadialMask(g.x * w, g.y * h, g.width * w, g.height * h, g.feather * 100);
+            else staging.createLinearMask(g.x * w, g.y * h, g.endX * w, g.endY * h, true);
+            mask.name = region.name;
+            mask.reason = region.reason;
+            mask.blend = 'additive';
+            for (const change of region.adjustments) mask.adjustments[change.key] = change.value;
+        }
+        this._nextMaskId = staging._nextMaskId;
+        return staging.masks;
     }
 
     createMask(type) {
@@ -41,6 +113,8 @@ class MaskEngine {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         const mask = {
+            id: ++this._nextMaskId,
+            revision: 0,
             type,
             canvas,
             ctx,
@@ -100,6 +174,7 @@ class MaskEngine {
     }
 
     _brushStroke(mask, x, y) {
+        this.touch(mask);
         const ctx = mask.ctx;
         const size = this.brushSize;
         const feather = this.brushFeather / 100;
@@ -122,11 +197,14 @@ class MaskEngine {
     createRadialMask(cx, cy, rx, ry, feather) {
         const mask = this.getActiveMask();
         if (!mask || mask.type !== 'radial') return;
+        this.touch(mask);
 
         const ctx = mask.ctx;
         const w = mask.canvas.width;
         const h = mask.canvas.height;
         ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, w, h);
 
         mask.params = { cx, cy, rx, ry, feather };
 
@@ -141,26 +219,29 @@ class MaskEngine {
         ctx.scale(rx / maxR, ry / maxR);
         ctx.translate(-cx, -cy);
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, w, h);
+        ctx.fillRect(cx - maxR, cy - maxR, maxR * 2, maxR * 2);
         ctx.restore();
     }
 
     // Linear gradient mask
-    createLinearMask(x1, y1, x2, y2) {
+    createLinearMask(x1, y1, x2, y2, soft = false) {
         const mask = this.getActiveMask();
         if (!mask || mask.type !== 'gradient') return;
+        this.touch(mask);
 
         const ctx = mask.ctx;
         const w = mask.canvas.width;
         const h = mask.canvas.height;
         ctx.clearRect(0, 0, w, h);
 
-        mask.params = { x1, y1, x2, y2 };
+        mask.params = { x1, y1, x2, y2, soft };
 
         const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
         gradient.addColorStop(0, 'black');
-        gradient.addColorStop(0.3, 'black');
-        gradient.addColorStop(0.7, 'white');
+        if (!soft) {
+            gradient.addColorStop(0.3, 'black');
+            gradient.addColorStop(0.7, 'white');
+        }
         gradient.addColorStop(1, 'white');
 
         ctx.fillStyle = gradient;
@@ -171,6 +252,7 @@ class MaskEngine {
     magicWandSelect(imgX, imgY, addMode) {
         const mask = this.getActiveMask();
         if (!mask || mask.type !== 'wand') return;
+        this.touch(mask);
 
         const mw = mask.canvas.width;
         const mh = mask.canvas.height;
@@ -389,6 +471,10 @@ class MaskEngine {
     handlePointerDown(canvasX, canvasY, imgX, imgY, shiftKey) {
         const mask = this.getActiveMask();
         if (!mask) return;
+        if (mask.type !== 'wand') {
+            imgX *= mask.canvas.width / this.app.imageWidth;
+            imgY *= mask.canvas.height / this.app.imageHeight;
+        }
 
         if (mask.type === 'brush') {
             this.brushStart(imgX, imgY);
@@ -403,6 +489,10 @@ class MaskEngine {
     handlePointerMove(canvasX, canvasY, imgX, imgY) {
         const mask = this.getActiveMask();
         if (!mask) return;
+        if (mask.type !== 'wand') {
+            imgX *= mask.canvas.width / this.app.imageWidth;
+            imgY *= mask.canvas.height / this.app.imageHeight;
+        }
 
         if (mask.type === 'brush') {
             this.brushMove(imgX, imgY);
@@ -415,7 +505,7 @@ class MaskEngine {
                 const ry = Math.abs(imgY - this._startPos.y) / 2;
                 this.createRadialMask(cx, cy, Math.max(rx, 10), Math.max(ry, 10), 50);
             } else if (mask.type === 'gradient') {
-                this.createLinearMask(this._startPos.x, this._startPos.y, imgX, imgY);
+                this.createLinearMask(this._startPos.x, this._startPos.y, imgX, imgY, mask.blend === 'additive');
             }
         }
     }

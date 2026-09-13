@@ -18,8 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v4
+      - name: Stage public editor assets only
+        run: |
+          mkdir -p _site
+          cp index.html manifest.json _site/
+          cp -R css js _site/
+          # Manual review uses these public modules, never server code or credentials.
+          test -f _site/js/review-prompt.js
+          test -f _site/js/review-json.js
+          test -f _site/js/review-manual.js
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: '_site'
       - id: deployment
         uses: actions/deploy-pages@v4
