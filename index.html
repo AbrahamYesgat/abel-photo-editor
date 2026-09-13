@@ -237,8 +237,8 @@
                         <button id="review-download-prompt" class="btn btn-outline" disabled>Download prompt</button>
                     </div>
                     <label class="review-field-label" for="review-paste">Paste ChatGPT's complete JSON response</label>
-                    <textarea id="review-paste" rows="6" maxlength="262144" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="review-paste-help" placeholder='{"rating": …, "summary": …, …}' disabled></textarea>
-                    <p id="review-paste-help" class="review-note">Maximum 256 KiB. JSON only, optionally in one complete JSON code fence. All required fields and bounds are checked. If invalid, ask ChatGPT to correct the full response using the same prompt, then retry without changing this edit.</p>
+                    <textarea id="review-paste" rows="6" maxlength="262144" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" aria-describedby="review-paste-help" placeholder="Paste the complete JSON copied from ChatGPT here." disabled></textarea>
+                    <p id="review-paste-help" class="review-note">Use the Copy button on ChatGPT's JSON code block rather than selecting or retyping text. Maximum 256 KiB. JSON only, optionally in one complete JSON code fence. All required fields and bounds are checked. If invalid, ask ChatGPT to correct the full response using the same prompt, then retry without changing this edit.</p>
                     <button id="review-import" class="btn btn-accent" disabled>Import review JSON</button>
                 </section>
                 <p id="review-status" class="review-status" role="status" aria-live="polite">Import a photo to get started.</p>

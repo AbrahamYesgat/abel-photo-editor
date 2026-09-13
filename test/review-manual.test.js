@@ -52,6 +52,25 @@ test('manual rejects duplicate fields at all depths including escaped member nam
     }
 });
 
+test('manual explains malformed mobile pastes without repairing or changing recipe text', () => {
+    const data = response();
+    data.summary = 'The \u201cquiet\u201d mood works.';
+    assert.deepEqual(manual.parseResponse(JSON.stringify(data)), data);
+    assert.throws(() => manual.parseResponse('{\u201crating\u201d:8}'), /curly quotation marks/);
+    assert.throws(() => manual.parseResponse('{"rating":'), /entire JSON code block/);
+    assert.throws(() => manual.parseResponse('Here is the JSON: {}'), /Invalid JSON syntax/);
+    assert.throws(() => manual.parseResponse('   '), /No response pasted/);
+    assert.throws(() => manual.parseResponse('{"rating":8,"rating":7}'), /Duplicate JSON field/);
+});
+
+test('reported mobile recipe passes unchanged with four global edits and two adaptive masks', () => {
+    const text = fs.readFileSync(require.resolve('./fixtures/mobile-review.json'), 'utf8');
+    const result = manual.parseResponse(text);
+    assert.deepEqual(result, JSON.parse(text));
+    assert.equal(result.adjustments.length, 4);
+    assert.equal(result.adaptive.regions.length, 2);
+});
+
 test('manual rejects unsupported, missing, nonfinite, oversized and out-of-bounds recipes without repairs', () => {
     for (const mutate of [
         value => { delete value.adaptive; },

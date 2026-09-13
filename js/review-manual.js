@@ -43,13 +43,24 @@ ${JSON.stringify(contract.reviewSchema, null, 2)}
             throw new Error('Response is too large. Paste at most 256 KiB of JSON.');
         }
         let text = input.trim();
+        if (!text) throw new Error('No response pasted. Copy the complete JSON response from ChatGPT.');
         // Accept only a single complete JSON fence, never extract JSON from surrounding prose.
         if (text.startsWith('```')) {
             const fence = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i.exec(text);
             if (!fence) throw new Error('Paste only the complete JSON object, optionally inside one JSON code fence.');
             text = fence[1];
         }
-        return contract.validateReview(json.parseJSON(text));
+        let value;
+        try {
+            value = json.parseJSON(text);
+        } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
+            if (/[\u201c\u201d]/.test(text)) {
+                throw new Error('Invalid JSON; curly quotation marks were found. JSON delimiters must use straight double quotes ("). Use ChatGPT\'s code-block Copy button and paste again; do not retype the recipe.');
+            }
+            throw new Error('Invalid JSON syntax. Copy the entire JSON code block using ChatGPT\'s Copy button, from the first { to the final }. Do not include introductory text or an incomplete response.');
+        }
+        return contract.validateReview(value);
     }
 
     function filename(source) {
