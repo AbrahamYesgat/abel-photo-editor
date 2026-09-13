@@ -726,16 +726,13 @@ html, body {
 .review-adjustment > span { float: right; font-variant-numeric: tabular-nums; }
 .review-adjustment p { clear: both; color: var(--text-secondary); font-size: 11px; }
 .review-apply-bar {
-    position: sticky;
-    bottom: 0;
     background: var(--bg-panel);
     border-top: 1px solid var(--border);
     padding: 12px 0 6px;
     margin-top: 12px;
-    z-index: 2;
 }
 .review-apply-bar label { display: flex; justify-content: space-between; margin-bottom: 10px; }
-#review-compare { width: 100%; touch-action: none; user-select: none; -webkit-touch-callout: none; }
+#review-compare { width: 100%; touch-action: pan-y; user-select: none; -webkit-touch-callout: none; }
 #panel-review button { min-height: 36px; }
 .vtab-review { font-size: 11px; font-weight: 700; flex-shrink: 0; }
 .compare-label {

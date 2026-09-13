@@ -828,12 +828,25 @@ class App {
         let pointer = null;
         let startX = 0, startY = 0;
         let active = false;
+        let touch = false;
+        let listeners = [];
+        const listen = (target, type, handler) => {
+            target.addEventListener(type, handler, { capture: true, passive: true });
+            listeners.push(() => target.removeEventListener(type, handler, true));
+        };
         const cleanup = () => {
             clearTimeout(timer);
             timer = null;
+            const captured = pointer;
             pointer = null;
+            touch = false;
             if (active && delayed) this._suppressCanvasClickUntil = Date.now() + 600;
             active = false;
+            listeners.forEach(remove => remove());
+            listeners = [];
+            if (captured !== null && element.hasPointerCapture?.(captured)) {
+                element.releasePointerCapture(captured);
+            }
         };
         this._comparisonStops ??= new Set();
         this._comparisonStops.add(cleanup);
@@ -842,14 +855,46 @@ class App {
             cleanup();
             if (wasActive) this._stopComparison();
         };
+        const moved = event => {
+            if (Math.hypot(event.clientX - startX, event.clientY - startY) > 12) end();
+        };
+        const watchRelease = () => {
+            // Capture observes releases even outside/over disabled controls or stopped bubbling.
+            listen(window, 'pointerup', event => { if (event.pointerId === pointer) end(); });
+            listen(window, 'pointercancel', event => { if (event.pointerId === pointer) end(); });
+            listen(window, 'pointerdown', event => { if (event.pointerId !== pointer) end(); });
+            listen(window, 'pointermove', event => {
+                if (event.pointerId !== pointer) return;
+                if (event.pointerType === 'mouse' && event.buttons === 0) end();
+                else moved(event);
+            });
+            // Safari can finish a touch without delivering the matching pointer release.
+            // Touch events only cancel/end the pointer-owned hold; they never start another.
+            listen(window, 'touchend', () => { if (touch) end(); });
+            listen(window, 'touchcancel', () => { if (touch) end(); });
+            listen(window, 'touchstart', event => { if (touch && event.touches.length !== 1) end(); });
+            listen(window, 'touchmove', event => {
+                if (!touch) return;
+                if (event.touches.length !== 1) end();
+                else moved(event.touches[0]);
+            });
+            listen(window, 'scroll', end);
+        };
         element.addEventListener('pointerdown', event => {
             if (!event.isPrimary) { end(); return; }
             if (event.button !== 0 || !this.image || element.disabled ||
                 (delayed && (this.maskMode || this.cropTool?.active))) return;
             this._stopComparison();
             pointer = event.pointerId;
+            touch = event.pointerType === 'touch';
             startX = event.clientX;
             startY = event.clientY;
+            watchRelease();
+            try {
+                element.setPointerCapture(pointer);
+            } catch {
+                // Capture may be unavailable or the pointer already cancelled; window/touch fallback remains.
+            }
             const start = () => {
                 timer = null;
                 if (pointer === null || (delayed && (this.maskMode || this.cropTool?.active))) return;
@@ -859,22 +904,19 @@ class App {
             if (delayed) timer = setTimeout(start, 350);
             else { event.preventDefault(); start(); }
         });
-        window.addEventListener('pointerdown', event => {
-            if (pointer !== null && event.pointerId !== pointer) end();
+        element.addEventListener('lostpointercapture', event => {
+            if (event.pointerId === pointer) end();
         });
-        window.addEventListener('pointermove', event => {
-            if (event.pointerId === pointer && Math.hypot(event.clientX - startX, event.clientY - startY) > 12) end();
-        });
-        window.addEventListener('pointerup', end);
-        window.addEventListener('pointercancel', end);
-        element.addEventListener('lostpointercapture', end);
         element.addEventListener('contextmenu', event => {
             if (this.image) event.preventDefault();
         });
         if (!delayed) {
             element.addEventListener('keydown', event => {
                 if ([' ', 'Enter'].includes(event.key) && !event.repeat) {
+                    if (!this.image || element.disabled) return;
                     event.preventDefault();
+                    this._stopComparison();
+                    listen(window, 'keyup', event => { if ([' ', 'Enter'].includes(event.key)) end(); });
                     active = true;
                     this._startComparison(preferReview);
                 }
