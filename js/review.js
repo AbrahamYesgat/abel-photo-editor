@@ -16,7 +16,8 @@ class ReviewPanel {
             'strength-value', 'apply', 'undo', 'compare', 'connection',
             'provider', 'provider-badge', 'provider-note', 'connection-title',
             'cloud-settings', 'local-settings', 'local-endpoint', 'local-token',
-            'check-local', 'consent-text', 'data-terms', 'alternative',
+            'check-local', 'local-token-field', 'remember-local', 'local-storage-status', 'forget-local',
+            'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
             'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
             this.elements[name] = document.getElementById(`review-${name}`);
@@ -25,6 +26,30 @@ class ReviewPanel {
         el['local-endpoint'].value = this.localDefault();
         el.provider.addEventListener('change', () => this.changeProvider());
         el['check-local'].addEventListener('click', () => this.checkLocalConnection());
+        el['forget-local'].addEventListener('click', () => this.forgetLocalConnection());
+        el['remember-local'].addEventListener('change', () => {
+            if (!el['remember-local'].checked) {
+                const token = this.savedLocalConnection?.token || el['local-token'].value;
+                this.forgetLocalConnection();
+                el['local-token'].value = token;
+            }
+        });
+        window.addEventListener('storage', event => {
+            if (event.key !== null && event.key !== this.localStorageKey()) return;
+            if (this.isLocal()) {
+                this.invalidate('Saved local connection changed in another tab. Check the connection again when ready.');
+                el.consent.checked = false;
+            }
+            this.savedLocalConnection = null;
+            el['local-token'].value = '';
+            this.localModel = null;
+            this.localStorageIssue = false;
+            this.localStorageStatus(event.newValue === null
+                ? 'Not saved on this browser. The connection was forgotten in another tab.'
+                : 'Saved connection changed in another tab. Reload to use it, or enter a token here.');
+            this.renderLocalConnection();
+            this.updateButtons();
+        });
         el.analyze.addEventListener('click', () => this.analyze());
         el.export.addEventListener('click', () => this.exportManual());
         el['download-preview'].addEventListener('click', () => this.downloadManual('image'));
@@ -55,6 +80,7 @@ class ReviewPanel {
                     el.consent.checked = false;
                     this.localModel = null;
                 }
+                if (field === 'local-endpoint') this.forgetLocalConnection();
                 this.updateButtons();
             });
         }
@@ -64,6 +90,96 @@ class ReviewPanel {
             this.updateButtons();
         });
         app._bindHoldCompare(el.compare, false, true);
+        this.restoreLocalConnection();
+        this.updateButtons();
+    }
+
+    localStorageKey() {
+        return 'abel.local-connection.v1';
+    }
+
+    localStorageStatus(message, error = false) {
+        this.elements['local-storage-status'].textContent = message;
+        this.elements['local-storage-status'].classList.toggle('review-error', error);
+    }
+
+    renderLocalConnection() {
+        this.elements['local-token-field'].hidden = !!this.savedLocalConnection;
+        this.elements['forget-local'].hidden = !this.savedLocalConnection && !this.localStorageIssue;
+    }
+
+    restoreLocalConnection() {
+        try {
+            const raw = window.localStorage.getItem(this.localStorageKey());
+            if (raw !== null) {
+                const saved = JSON.parse(raw);
+                if (!saved || saved.version !== 1 || typeof saved.endpoint !== 'string' ||
+                    !saved.endpoint || saved.endpoint.length > 2048 ||
+                    typeof saved.token !== 'string' || !/^[\x21-\x7e]{1,4096}$/.test(saved.token) ||
+                    Object.keys(saved).sort().join(',') !== 'endpoint,token,version') {
+                    throw new Error('Invalid saved connection');
+                }
+                const endpoint = this.localEndpoint(saved.endpoint);
+                this.savedLocalConnection = { version: 1, endpoint, token: saved.token };
+                this.elements['local-endpoint'].value = endpoint.replace(/\/api\/review\/local$/, '');
+                this.elements['local-token'].value = '';
+                this.elements['remember-local'].checked = true;
+                this.elements.provider.value = 'local';
+                this.changeProvider();
+                this.localStorageStatus('Saved on this browser. No photo is sent until you consent and request a review.');
+            }
+        } catch {
+            this.localStorageIssue = true;
+            this.localStorageStatus('Saved connection could not be loaded: browser storage is unavailable or the saved connection is invalid. Enter a valid loopback URL and token, or Forget to clear it.', true);
+        }
+        this.renderLocalConnection();
+    }
+
+    localAccessToken() {
+        if (this.savedLocalConnection) {
+            if (this.localEndpoint(this.elements['local-endpoint'].value) !== this.savedLocalConnection.endpoint) {
+                throw new Error('The saved token belongs to a different local companion. Use Forget / change connection and enter its token.');
+            }
+            return this.savedLocalConnection.token;
+        }
+        return this.elements['local-token'].value.trim();
+    }
+
+    rememberLocalConnection(endpoint) {
+        if (!this.elements['remember-local'].checked) return;
+        const token = this.localAccessToken();
+        // Same-origin local use needs no token; never obtain one from the server.
+        if (!token) return;
+        try {
+            if (!/^[\x21-\x7e]{1,4096}$/.test(token)) throw new Error('Invalid token');
+            const saved = { version: 1, endpoint: this.localEndpoint(endpoint), token };
+            window.localStorage.setItem(this.localStorageKey(), JSON.stringify(saved));
+            this.savedLocalConnection = saved;
+            this.elements['local-token'].value = '';
+            this.localStorageIssue = false;
+            this.localStorageStatus('Saved on this browser. Use Forget / change connection to remove the saved token.');
+        } catch {
+            this.localStorageIssue = true;
+            this.localStorageStatus('Connected, but browser storage could not save this connection. It works in this tab only; you may need to paste the token after refreshing.', true);
+        }
+        this.renderLocalConnection();
+    }
+
+    forgetLocalConnection() {
+        this.invalidate('Local credentials cleared. Enter the connection token again when ready. Existing photo edits are unchanged.');
+        this.elements.consent.checked = false;
+        this.localModel = null;
+        this.savedLocalConnection = null;
+        this.elements['local-token'].value = '';
+        try {
+            window.localStorage.removeItem(this.localStorageKey());
+            this.localStorageIssue = false;
+            this.localStorageStatus('Not saved on this browser.');
+        } catch {
+            this.localStorageIssue = true;
+            this.localStorageStatus('Token cleared from this tab, but browser storage could not be cleared. Clear this site’s stored data in browser settings to remove any saved connection.', true);
+        }
+        this.renderLocalConnection();
         this.updateButtons();
     }
 
@@ -115,7 +231,7 @@ class ReviewPanel {
     }
 
     requestHeaders() {
-        const token = this.elements[this.isLocal() ? 'local-token' : 'token'].value.trim();
+        const token = this.isLocal() ? this.localAccessToken() : this.elements.token.value.trim();
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers.Authorization = `Bearer ${token}`;
         return headers;
@@ -149,6 +265,7 @@ class ReviewPanel {
             }
             this.localModel = data.model;
             this.elements['provider-badge'].textContent = data.model;
+            this.rememberLocalConnection(endpoint);
             this.setStatus(`${data.model} is installed locally and ready. No photo was sent by this check.`);
         } catch (error) {
             if (controller && this.controller !== controller) return;
@@ -369,11 +486,18 @@ class ReviewPanel {
             throw new Error('Choose Gemini or Local Qwen before reviewing.');
         }
         const localProvider = this.isLocal();
+        if (localProvider) return this.localEndpoint(this.elements['local-endpoint'].value);
+        return this.validatedEndpoint(this.elements.endpoint.value.trim() || window.location.origin, false);
+    }
+
+    localEndpoint(value) {
+        return this.validatedEndpoint(value.trim() || this.localDefault(), true);
+    }
+
+    validatedEndpoint(value, localProvider) {
         let url;
         try {
-            url = new URL(localProvider
-                ? this.elements['local-endpoint'].value.trim() || this.localDefault()
-                : this.elements.endpoint.value.trim() || window.location.origin);
+            url = new URL(value);
         } catch {
             throw new Error('Enter a valid HTTPS backend URL, or leave it blank for this server.');
         }
@@ -455,6 +579,7 @@ class ReviewPanel {
             }
             if (this.controller !== controller || !this.matches(this.context)) return;
             this.result = ReviewContract.validateReview(data);
+            if (localProvider) this.rememberLocalConnection(endpoint);
             this.showResult();
             this.setStatus(this.hasSuggestions()
                 ? 'Review ready. Select Global or Adaptive, check strength and suggestions, then Apply. Nothing has changed yet.'

@@ -711,6 +711,7 @@ html, body {
 }
 #panel-review textarea { resize: vertical; min-height: 64px; max-height: 180px; }
 .review-consent { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; font-size: 11px; }
+.review-connection .review-consent { display: flex; }
 .review-consent input { flex-shrink: 0; margin-top: 4px; width: 16px; height: 16px; }
 .review-request-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .review-manual-steps { padding-left: 20px; margin: 12px 0; }

@@ -201,11 +201,20 @@
                         <p class="review-note">Run Ollama and the ABEL companion on this computer. The deployed website can connect here too; Qwen runs locally, not on the website's server.</p>
                         <label for="review-local-endpoint">Local companion URL</label>
                         <input id="review-local-endpoint" type="url" placeholder="http://127.0.0.1:4178" autocomplete="off">
-                        <label for="review-local-token">Local access token</label>
-                        <input id="review-local-token" type="password" autocomplete="off" spellcheck="false">
+                        <div id="review-local-token-field">
+                            <label for="review-local-token">Local access token</label>
+                            <input id="review-local-token" type="password" autocomplete="off" spellcheck="false" aria-describedby="review-local-storage-note">
+                        </div>
+                        <label class="review-consent">
+                            <input id="review-remember-local" type="checkbox" checked aria-describedby="review-local-storage-note">
+                            Remember on this browser
+                        </label>
+                        <p id="review-local-storage-note" class="review-note">After a successful connection check or review, saves only the local URL and access token in this website's browser storage. Scripts on this website can access it. Avoid shared devices; uncheck for this tab only.</p>
+                        <p id="review-local-storage-status" class="review-note" role="status">Not saved yet. Paste once, then Check local connection to remember it without sending a photo.</p>
+                        <button id="review-forget-local" class="btn btn-outline" type="button" hidden>Forget / change connection</button>
                         <p class="review-note">The deployed website requires your companion's local access token and an allowed origin. Your browser may ask for local-network permission. On a phone, localhost means the phone, not your computer.</p>
                     </div>
-                    <p class="review-note">Connection details stay in memory for this tab only.</p>
+                    <p class="review-note">Gemini backend credentials stay in memory for this tab only. Saved local connections never grant photo-processing consent.</p>
                 </details>
                 <button id="review-check-local" class="btn btn-outline" hidden>Check local connection</button>
                 <label class="review-field-label" for="review-intent">What are you going for?</label>

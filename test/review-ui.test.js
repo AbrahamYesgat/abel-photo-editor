@@ -6,13 +6,25 @@ const path = require('node:path');
 const ReviewContract = require('../js/review-contract.js');
 const ReviewManual = require('../js/review-manual.js');
 
-function harness() {
+function memoryStorage() {
+    const values = new Map();
+    return {
+        getItem: key => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, value),
+        removeItem: key => values.delete(key),
+        values,
+    };
+}
+
+function harness({ storage = memoryStorage(), initialize = false } = {}) {
     const elements = new Map();
     const element = () => ({
         disabled: false, hidden: false, value: '100', textContent: '',
         classList: { toggle() {}, remove() {} }, style: {},
         children: [],
-        addEventListener() {},
+        listeners: {},
+        addEventListener(name, listener) { this.listeners[name] = listener; },
+        dispatch(name) { this.listeners[name]?.(); },
         replaceChildren(...children) { this.children = children; },
         append(...children) { this.children.push(...children); },
         appendChild(child) { this.children.push(child); },
@@ -35,7 +47,10 @@ function harness() {
         querySelectorAll() { return []; },
     };
     const context = vm.createContext({
-        document, window: { location: { origin: 'http://localhost:3000' } },
+        document, window: {
+            location: { origin: 'http://localhost:3000' }, localStorage: storage,
+            listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; },
+        },
         ReviewContract, ReviewManual, console, setTimeout, clearTimeout, URL, AbortController,
         Blob, atob, navigator: {},
     });
@@ -55,7 +70,7 @@ function harness() {
     app.maskEngine = new context.MaskEngine(app);
     app._render = () => app.review?.onRender();
     app._pushHistory();
-    const review = Object.create(context.ReviewPanel.prototype);
+    let review = Object.create(context.ReviewPanel.prototype);
     Object.assign(review, {
         app, result: null, context: null, controller: null, appliedContext: null, beforeState: null,
         elements: {},
@@ -63,6 +78,7 @@ function harness() {
     for (const name of ['analyze', 'cancel', 'status', 'consent', 'apply', 'undo', 'compare',
         'strength', 'apply-bar', 'result', 'provider', 'provider-badge', 'provider-note',
         'connection-title', 'connection', 'cloud-settings', 'local-settings', 'check-local',
+        'local-token-field', 'remember-local', 'local-storage-status', 'forget-local',
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
@@ -74,8 +90,15 @@ function harness() {
         review.elements[name].value = '';
     }
     review.elements.consent.checked = true;
+    review.elements['remember-local'].checked = true;
+    if (initialize) {
+        for (const [name, element] of Object.entries(review.elements)) elements.set(`review-${name}`, element);
+        review.elements.consent.checked = false;
+        app._bindHoldCompare = () => {};
+        review = new context.ReviewPanel(app);
+    }
     app.review = review;
-    return { app, review, document, context };
+    return { app, review, document, context, storage };
 }
 
 function response(adjustments) {
@@ -521,6 +544,254 @@ test('local connection checks send no photo and require a local-only ready model
         assert.equal(review.result, null);
         assert.match(review.elements.status.textContent, valid ? /No photo was sent/ : /did not identify/);
     }
+});
+
+const localReady = () => Response.json({
+    provider: 'ollama', model: 'qwen3-vl:2b-instruct', ready: true, localOnly: true,
+});
+const savedLocal = {
+    version: 1, endpoint: 'http://localhost:4178/api/review/local', token: 'synthetic-local-token',
+};
+const localKey = 'abel.local-connection.v1';
+
+function localConnectionHarness(options) {
+    const fixture = harness({ initialize: true, ...options });
+    fixture.review.elements.provider.value = 'local';
+    fixture.review.changeProvider();
+    fixture.review.elements['local-endpoint'].value = 'http://localhost:4178';
+    fixture.context.fetch = async () => localReady();
+    return fixture;
+}
+
+test('local credentials are saved only after success and restored hidden without consent or requests', async () => {
+    const { review, context, storage } = localConnectionHarness();
+    review.elements['local-token'].value = savedLocal.token;
+    review.elements['local-token'].dispatch('input');
+    assert.equal(storage.getItem(localKey), null, 'typing does not persist credentials');
+    let request;
+    context.fetch = async (url, options) => {
+        request = { url, ...options };
+        assert.equal(storage.getItem(localKey), null, 'authentication must finish first');
+        return localReady();
+    };
+    await review.checkLocalConnection();
+    assert.equal(request.headers.Authorization, `Bearer ${savedLocal.token}`);
+    assert.equal(request.body, undefined);
+    assert.deepEqual(JSON.parse(storage.getItem(localKey)), savedLocal);
+    assert.equal(storage.values.size, 1);
+    assert.equal(review.elements['local-token'].value, '');
+    assert.equal(review.elements['local-token-field'].hidden, true);
+    assert.equal(review.elements['forget-local'].hidden, false);
+    assert.match(review.elements['local-storage-status'].textContent, /Saved on this browser/);
+    for (let tab = 0; tab < 2; tab++) {
+        const restored = harness({ storage, initialize: true }).review;
+        assert.equal(restored.elements.provider.value, 'local');
+        assert.equal(restored.elements.consent.checked, false);
+        assert.equal(restored.elements.analyze.disabled, true);
+        assert.equal(restored.elements['local-token-field'].hidden, true);
+        assert.equal(restored.requestHeaders().Authorization, `Bearer ${savedLocal.token}`);
+        assert.equal(restored.controller, null);
+        assert.equal(restored.result, null);
+    }
+});
+
+test('opt-out and same-origin tokenless checks never persist credentials', async () => {
+    for (const token of ['', savedLocal.token]) {
+        const { review, storage } = localConnectionHarness();
+        review.elements['remember-local'].checked = !token;
+        review.elements['local-token'].value = token;
+        await review.checkLocalConnection();
+        assert.equal(storage.getItem(localKey), null);
+        assert.equal(review.elements['local-token'].value, token);
+    }
+});
+
+test('unauthorized, unready, malformed and failed checks never save a token', async () => {
+    for (const result of [
+        () => Response.json({ error: 'Denied' }, { status: 401 }),
+        () => Response.json({ provider: 'ollama', ready: false, localOnly: true, model: 'qwen3-vl:2b' }),
+        () => Response.json({ provider: 'gemini', ready: true }),
+        () => new Response('not json'),
+        () => { throw new TypeError('Network failed'); },
+    ]) {
+        const { review, context, storage } = localConnectionHarness();
+        review.elements['local-token'].value = savedLocal.token;
+        context.fetch = async () => result();
+        await review.checkLocalConnection();
+        assert.equal(storage.getItem(localKey), null);
+        assert.equal(review.elements['local-token-field'].hidden, false);
+        assert.doesNotMatch(review.elements['local-storage-status'].textContent, /Saved on this browser/);
+    }
+});
+
+test('only successful validated local reviews persist; cloud credentials and request bodies stay separate', async () => {
+    for (const provider of ['local', 'gemini']) {
+        for (const valid of [true, false]) {
+            const { review, context, storage } = localConnectionHarness();
+            review.elements.provider.value = provider;
+            review.elements.consent.checked = true;
+            review.elements['local-token'].value = savedLocal.token;
+            review.elements.token.value = 'synthetic-cloud-token';
+            review.preview = () => 'synthetic-preview';
+            review.showResult = () => {};
+            context.ReviewContract = { ...ReviewContract, validateRequest() {} };
+            context.fetch = async (url, options) => {
+                assert.equal(options.headers.Authorization, `Bearer ${provider === 'local' ? savedLocal.token : 'synthetic-cloud-token'}`);
+                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'image', 'intent']);
+                assert.ok(!options.body.includes('token'));
+                return Response.json(valid ? response([]) : { error: 'Malformed review' });
+            };
+            await review.analyze();
+            assert.equal(storage.getItem(localKey) !== null, provider === 'local' && valid);
+        }
+    }
+});
+
+test('saved credentials cannot follow changed endpoints, including a changed loopback port', async () => {
+    const { review, context, storage } = localConnectionHarness();
+    review.elements['local-token'].value = savedLocal.token;
+    await review.checkLocalConnection();
+    review.elements['local-endpoint'].value = 'http://localhost:4179';
+    let requests = 0;
+    context.fetch = async () => { requests++; return localReady(); };
+    await review.checkLocalConnection();
+    assert.equal(requests, 0, 'even a programmatic endpoint change cannot forward saved credentials');
+    assert.match(review.elements.status.textContent, /different local companion/);
+    review.elements['local-endpoint'].dispatch('input');
+    assert.equal(storage.getItem(localKey), null);
+    assert.equal(review.elements['local-token'].value, '');
+    assert.equal(review.elements['local-token-field'].hidden, false);
+    assert.equal(review.elements.consent.checked, false);
+    assert.equal(review.requestHeaders().Authorization, undefined);
+});
+
+test('Forget clears token and aborts checks, ignores late success, and preserves photo edits and masks', async () => {
+    const { review, context, storage, app } = localConnectionHarness();
+    review.elements['local-token'].value = savedLocal.token;
+    await review.checkLocalConnection();
+    app.state.exposure = 0.7;
+    app.maskEngine.createMask('brush');
+    const before = review.snapshot();
+    let finish;
+    let signal;
+    context.fetch = (url, options) => {
+        signal = options.signal;
+        return new Promise(resolve => { finish = resolve; });
+    };
+    const pending = review.checkLocalConnection();
+    review.elements['forget-local'].dispatch('click');
+    assert.equal(signal.aborted, true);
+    finish(localReady());
+    await pending;
+    assert.equal(storage.getItem(localKey), null);
+    assert.equal(review.savedLocalConnection, null);
+    assert.equal(review.elements['local-token'].value, '');
+    assert.equal(review.elements['local-token-field'].hidden, false);
+    assert.equal(review.snapshot().edits, before.edits);
+    assert.equal(app.image, before.image);
+});
+
+test('editing token during authentication aborts and does not save the late response', async () => {
+    const { review, context, storage } = localConnectionHarness();
+    let finish;
+    context.fetch = () => new Promise(resolve => { finish = resolve; });
+    review.elements['local-token'].value = 'first-test-token';
+    const pending = review.checkLocalConnection();
+    review.elements['local-token'].value = 'second-test-token';
+    review.elements['local-token'].dispatch('input');
+    finish(localReady());
+    await pending;
+    assert.equal(storage.getItem(localKey), null);
+});
+
+test('unchecking remember removes persistence but retains usable session-only credentials', async () => {
+    const { review, storage } = localConnectionHarness();
+    review.elements['local-token'].value = savedLocal.token;
+    await review.checkLocalConnection();
+    review.elements['remember-local'].checked = false;
+    review.elements['remember-local'].dispatch('change');
+    assert.equal(storage.getItem(localKey), null);
+    assert.equal(review.requestHeaders().Authorization, `Bearer ${savedLocal.token}`);
+    await review.checkLocalConnection();
+    assert.equal(storage.getItem(localKey), null);
+});
+
+test('forgetting in another tab clears memory and aborts local work without affecting cloud or manual work', async () => {
+    for (const provider of ['local', 'gemini', 'manual']) {
+        const storage = memoryStorage();
+        storage.setItem(localKey, JSON.stringify(savedLocal));
+        const { review, context } = harness({ storage, initialize: true });
+        review.elements.provider.value = provider;
+        review.elements.consent.checked = true;
+        const controller = new AbortController();
+        review.controller = controller;
+        storage.removeItem(localKey);
+        context.window.listeners.storage({ key: localKey, newValue: null });
+        assert.equal(review.savedLocalConnection, null);
+        assert.equal(review.elements['local-token'].value, '');
+        assert.equal(review.elements['local-token-field'].hidden, false);
+        assert.equal(controller.signal.aborted, provider === 'local');
+        assert.equal(review.elements.consent.checked, provider !== 'local');
+    }
+});
+
+test('invalid stored values are rejected visibly using the same loopback URL constraints', () => {
+    for (const raw of [
+        'bad json', 'null', '[]', JSON.stringify({ ...savedLocal, version: 2 }),
+        JSON.stringify({ ...savedLocal, token: '' }), JSON.stringify({ ...savedLocal, token: 'a\nb' }),
+        JSON.stringify({ ...savedLocal, image: 'must-not-be-stored' }),
+        ...['https://remote.example', 'http://localhost:4178/api/chat', 'http://user:pass@localhost:4178',
+            'http://localhost:4178?token=anything', 'http://localhost:4178#fragment', 'file:///etc/passwd', '']
+            .map(endpoint => JSON.stringify({ ...savedLocal, endpoint })),
+    ]) {
+        const storage = memoryStorage();
+        storage.setItem(localKey, raw);
+        const { review } = harness({ storage, initialize: true });
+        assert.equal(review.savedLocalConnection, undefined);
+        assert.equal(review.elements['local-token'].value, '');
+        assert.equal(review.elements['local-token-field'].hidden, false);
+        assert.match(review.elements['local-storage-status'].textContent, /could not be loaded/);
+        review.forgetLocalConnection();
+        assert.equal(storage.getItem(localKey), null);
+    }
+});
+
+test('storage read/write/removal failures stay explicit and do not prevent in-memory authentication', async () => {
+    const storage = {
+        getItem() { throw new Error('Denied'); },
+        setItem() { throw new Error('Quota exceeded'); },
+        removeItem() { throw new Error('Denied'); },
+    };
+    const { review } = localConnectionHarness({ storage });
+    assert.match(review.elements['local-storage-status'].textContent, /could not be loaded/);
+    review.elements['local-token'].value = savedLocal.token;
+    await review.checkLocalConnection();
+    assert.match(review.elements.status.textContent, /ready/);
+    assert.match(review.elements['local-storage-status'].textContent, /could not save/);
+    assert.equal(review.elements['local-token-field'].hidden, false);
+    assert.equal(review.requestHeaders().Authorization, `Bearer ${savedLocal.token}`);
+    review.forgetLocalConnection();
+    assert.equal(review.requestHeaders().Authorization, undefined);
+    assert.match(review.elements['local-storage-status'].textContent, /could not be cleared/);
+});
+
+test('restored local tokens never enter cloud headers or manual exports', async () => {
+    const storage = memoryStorage();
+    storage.setItem(localKey, JSON.stringify(savedLocal));
+    const { review, context } = harness({ storage, initialize: true });
+    review.elements.provider.value = 'gemini';
+    review.changeProvider();
+    assert.equal(review.requestHeaders().Authorization, undefined);
+    review.elements.provider.value = 'manual';
+    review.changeProvider();
+    review.preview = () => manualJPEG;
+    review.download = () => {};
+    context.fetch = () => { throw new Error('Must not send requests'); };
+    await review.exportManual();
+    assert.ok(review.manualExport);
+    assert.ok(!review.manualExport.prompt.includes(savedLocal.token));
+    assert.ok(!review.manualExport.prompt.includes(savedLocal.endpoint));
+    assert.deepEqual(JSON.parse(storage.getItem(localKey)), savedLocal);
 });
 
 // Minimal structural JPEG fixture; browser checks use an actual decoded rendered JPEG.
