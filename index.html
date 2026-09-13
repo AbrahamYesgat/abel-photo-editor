@@ -240,6 +240,8 @@
                     <textarea id="review-paste" rows="6" maxlength="262144" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" aria-describedby="review-paste-help" placeholder="Paste the complete JSON copied from ChatGPT here." disabled></textarea>
                     <p id="review-paste-help" class="review-note">Use the Copy button on ChatGPT's JSON code block rather than selecting or retyping text. Maximum 256 KiB. JSON only, optionally in one complete JSON code fence. All required fields and bounds are checked. If invalid, ask ChatGPT to correct the full response using the same prompt, then retry without changing this edit.</p>
                     <button id="review-import" class="btn btn-accent" disabled>Import review JSON</button>
+                    <button id="review-fix-quotes" class="btn btn-outline" aria-describedby="review-fix-quotes-help" disabled>Fix smart quotes &amp; import</button>
+                    <p id="review-fix-quotes-help" class="review-note">If mobile pasting changed JSON delimiters to paired “smart quotes”, this optional local repair fixes only those delimiters. Corrected JSON appears above only after full validation. Text punctuation and edit values stay unchanged; ambiguous quotes or other errors are rejected. Nothing is applied automatically.</p>
                 </section>
                 <p id="review-status" class="review-status" role="status" aria-live="polite">Import a photo to get started.</p>
                 <div id="review-result" hidden>

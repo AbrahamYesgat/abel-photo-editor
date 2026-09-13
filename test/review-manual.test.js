@@ -16,6 +16,8 @@ const response = () => ({
     adjustments: [], adaptive: { adjustments: [], regions: [] }
 });
 
+const smartDelimiters = text => text.replace(/"(?:[^"\\]|\\.)*"/g, token => `“${token.slice(1, -1)}”`);
+
 test('manual and server use identical public prompt and duplicate-member parser', () => {
     assert.equal(require('../server/prompt.js'), require('../js/review-prompt.js'));
     assert.equal(require('../server/json.js'), require('../js/review-json.js'));
@@ -69,6 +71,86 @@ test('reported mobile recipe passes unchanged with four global edits and two ada
     assert.deepEqual(result, JSON.parse(text));
     assert.equal(result.adjustments.length, 4);
     assert.equal(result.adaptive.regions.length, 2);
+});
+
+test('opt-in repair imports the exact mobile recipe without changing text or numeric edit values', () => {
+    const text = fs.readFileSync(require.resolve('./fixtures/mobile-review.json'), 'utf8').trim();
+    const mobile = smartDelimiters(text);
+    assert.throws(() => manual.parseResponse(mobile), /Invalid JSON/);
+    const fixed = manual.repairSmartQuotes(mobile);
+    assert.equal(fixed.text, text);
+    assert.deepEqual(fixed.review, JSON.parse(text));
+    assert.deepEqual(manual.parseResponse(fixed.text), fixed.review);
+    for (const fenced of ['```json\r\n' + mobile + '\r\n```', ' \n```\n' + mobile + '\n``` \n']) {
+        assert.equal(manual.repairSmartQuotes(fenced).text, text);
+    }
+});
+
+test('repair preserves nested smart-quoted prose, apostrophes, escapes and already straight strings', () => {
+    const data = response();
+    data.summary = 'The “quiet, “soft” mood” works; photographer’s 6’ framing.';
+    data.cropFeedback = 'Keep \\"quoted\\" framing.\nPath C:\\photo; tab\tend.';
+    const text = JSON.stringify(data).replace('framing.', '\\u0066raming.');
+    const fixed = manual.repairSmartQuotes(smartDelimiters(text));
+    assert.equal(fixed.text, text);
+    assert.deepEqual(fixed.review, data);
+    const mixed = text.replace('"rating"', '“rating”').replace('"genre":"Landscape"', '“genre”:“Landscape”');
+    assert.equal(manual.repairSmartQuotes(mixed).text, text);
+    data.summary = 'Ordinary unpaired ” punctuation and “ opening inside a valid straight string.';
+    const straight = JSON.stringify(data);
+    assert.deepEqual(manual.parseResponse(straight), data);
+    assert.equal(manual.repairSmartQuotes(straight.replace('"rating"', '“rating”')).text, straight);
+    assert.throws(() => manual.repairSmartQuotes(straight), /No structural smart-quote pairs/);
+    const escaped = text.replace('"summary":', '"\\u0073ummary":').replace('"rating":8', '"rating":8e0');
+    assert.equal(manual.repairSmartQuotes(smartDelimiters(escaped)).text, escaped);
+});
+
+test('repair rejects unsafe boundaries, truncation, other syntax and unsupported full recipes', () => {
+    const valid = smartDelimiters(JSON.stringify(response()));
+    for (const text of [
+        valid.replace('“Quiet light.”', '“Quiet light."'),
+        valid.replace('“Quiet light.”', '"Quiet light.”'),
+        valid.replace('“Quiet light.”', '”Quiet light.”'),
+        valid.replace('“Quiet light.”', '“Quiet ” light.”'),
+        valid.replace('“Quiet light.”', '“Quiet “light.”'),
+        valid.replace('“Quiet light.”', '“Quiet "light".”'),
+        valid.replace('“Quiet light.”', '“Quiet\\” light.”'),
+        valid.replace('“Quiet light.”', '“Quiet\nlight.”'),
+        valid.slice(0, -1), valid.slice(0, -3), valid + valid,
+        `Here is the review: ${valid}`, `${valid}\nDone.`,
+        '```json\n' + valid, '```js\n' + valid + '\n```',
+        valid.replace('“rating”:8', '“rating”:8,'),
+        valid.replace('“rating”:8', '“rating”:1e999'),
+        valid.replace('“rating”:8', '“rating”:“8”'),
+        valid.replace('“rating”:8', '“rating”:8,“tool”:“retouch”'),
+        valid.replace('“rating”:8,', ''),
+        valid.replace('“adjustments”:[]', '“adjustments”:[{“key”:“clarity”,“value”:5,“reason”:“Sharp”}]'),
+        valid.replace('“regions”:[]', '“regions”:[{“name”:“Invalid”}]'),
+    ]) {
+        assert.throws(() => manual.repairSmartQuotes(text), undefined, text.slice(0, 100));
+    }
+    assert.throws(() => manual.repairSmartQuotes('{"rating":'), /No structural smart-quote pairs/);
+    assert.throws(() => manual.repairSmartQuotes('not JSON'), /No structural smart-quote pairs/);
+    assert.throws(() => manual.repairSmartQuotes(valid.slice(0, -1)), /Other syntax errors/);
+});
+
+test('repair retains shared duplicate detection including escaped aliases and byte bounds', () => {
+    const text = JSON.stringify(response());
+    for (const [find, replacement] of [
+        ['"rating":8', '"rating":8,"\\u0072ating":7'],
+        ['"genre":"Landscape"', '"genre":"Landscape","genre":"Portrait"'],
+        ['"regions":[]', '"regions":[],"\\u0072egions":[]'],
+    ]) {
+        assert.throws(() => manual.repairSmartQuotes(smartDelimiters(text.replace(find, replacement))), /Duplicate JSON field/);
+    }
+    const mobile = smartDelimiters(text);
+    const byteLength = new TextEncoder().encode(mobile).length;
+    assert.deepEqual(manual.repairSmartQuotes(mobile + ' '.repeat(manual.MAX_RESPONSE_BYTES - byteLength)).review, response());
+    for (const parse of [manual.parseResponse, manual.repairSmartQuotes]) {
+        assert.throws(() => parse(mobile + ' '.repeat(manual.MAX_RESPONSE_BYTES - byteLength + 1)), /too large/);
+        assert.throws(() => parse('雪'.repeat(90000)), /too large/);
+        assert.throws(() => parse('x'.repeat(manual.MAX_RESPONSE_BYTES + 1)), /too large/);
+    }
 });
 
 test('manual rejects unsupported, missing, nonfinite, oversized and out-of-bounds recipes without repairs', () => {

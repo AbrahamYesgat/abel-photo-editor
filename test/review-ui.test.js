@@ -66,7 +66,7 @@ function harness() {
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
-        'download-prompt', 'prompt', 'paste', 'import']) {
+        'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
         review.elements[name] = element();
     }
     review.elements.provider.value = 'gemini';
@@ -637,6 +637,77 @@ test('manual import requires an export in this tab; malformed replies can be cor
     await review.exportManual();
     assert.equal(review.result, null);
     assert.equal(review.elements.paste.value, '');
+});
+
+test('manual smart-quote repair is opt-in, transparent, transactional and never auto-applies', async () => {
+    const { app, review } = manualHarness();
+    const text = readFileSync(path.join(__dirname, 'fixtures/mobile-review.json'), 'utf8').trim();
+    const mobile = text.replace(/"(?:[^"\\]|\\.)*"/g, token => `“${token.slice(1, -1)}”`);
+    review.updateButtons();
+    assert.equal(review.elements['fix-quotes'].disabled, true);
+    await review.exportManual();
+    const baseline = review.context;
+    const state = JSON.stringify(app.state);
+    const history = app.history.length;
+    review.elements.paste.value = mobile;
+    review.updateButtons();
+    assert.equal(review.elements['fix-quotes'].disabled, false);
+    review.importManual();
+    assert.equal(review.result, null);
+    assert.equal(review.elements.paste.value, mobile);
+    review.importManual(true);
+    assert.deepEqual(review.result, JSON.parse(text));
+    assert.equal(review.elements.paste.value, text);
+    assert.match(review.elements.status.textContent, /corrected JSON is shown above/);
+    assert.equal(review.elements.apply.disabled, true);
+    assert.equal(review.selection, '');
+    assert.equal(review.context, baseline);
+    assert.equal(JSON.stringify(app.state), state);
+    assert.equal(app.history.length, history);
+    for (const invalid of [
+        mobile.slice(0, -1),
+        mobile.replace('“rating”:', '“rating”:8,“\\u0072ating”:'),
+        mobile.replace('“rating”:', '“unsupported”:1,“rating”:'),
+        mobile.replace('“summary”:', '“summary":'),
+        'not JSON',
+    ]) {
+        review.elements.paste.value = invalid;
+        review.importManual(true);
+        assert.equal(review.result, null);
+        assert.equal(review.elements.paste.value, invalid);
+        assert.equal(review.context, baseline);
+        assert.equal(JSON.stringify(app.state), state);
+        assert.equal(app.history.length, history);
+        assert.match(review.elements.status.textContent, /Cannot import/);
+    }
+});
+
+test('repair action refuses absent, stale, switched, busy and crop baselines', async () => {
+    for (const change of [
+        (app, review) => { review.manualExport = null; },
+        app => { app.image = {}; },
+        app => { app.state.saturation = 8; },
+        app => { app.curveEditor.channels.rgb[1].y = 220; },
+        (app, review) => { review.elements.intent.value = 'Different intent'; },
+        (app, review) => { review.elements.provider.value = 'gemini'; review.changeProvider(); },
+        (app, review) => { review.controller = new AbortController(); },
+        app => { app.cropTool = { active: true }; },
+    ]) {
+        const { app, review } = manualHarness();
+        await review.exportManual();
+        change(app, review);
+        const state = JSON.stringify(app.state);
+        const history = app.history.length;
+        review.elements.paste.value = JSON.stringify(response([])).replace('"rating"', '“rating”');
+        const pasted = review.elements.paste.value;
+        review.updateButtons();
+        assert.equal(review.elements['fix-quotes'].disabled, true);
+        review.importManual(true);
+        assert.equal(review.result, null);
+        assert.equal(review.elements.paste.value, pasted);
+        assert.equal(JSON.stringify(app.state), state);
+        assert.equal(app.history.length, history);
+    }
 });
 
 test('every manual baseline component and provider/intent change invalidates the export', async () => {

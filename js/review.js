@@ -18,7 +18,7 @@ class ReviewPanel {
             'cloud-settings', 'local-settings', 'local-endpoint', 'local-token',
             'check-local', 'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
-            'download-prompt', 'prompt', 'paste', 'import']) {
+            'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
             this.elements[name] = document.getElementById(`review-${name}`);
         }
         const el = this.elements;
@@ -31,6 +31,7 @@ class ReviewPanel {
         el['download-prompt'].addEventListener('click', () => this.downloadManual('prompt'));
         el['copy-prompt'].addEventListener('click', () => this.copyManualPrompt());
         el.import.addEventListener('click', () => this.importManual());
+        el['fix-quotes'].addEventListener('click', () => this.importManual(true));
         el.paste.addEventListener('input', () => this.updateButtons());
         el.cancel.addEventListener('click', () => this.invalidate('Review cancelled. Nothing was applied.'));
         el.apply.addEventListener('click', () => this.apply());
@@ -248,6 +249,7 @@ class ReviewPanel {
             el[name].disabled = !manualReady;
         }
         el.import.disabled = !manualReady || !el.paste.value.trim();
+        el['fix-quotes'].disabled = el.import.disabled;
         el.paste.disabled = !manualReady;
     }
 
@@ -330,10 +332,12 @@ class ReviewPanel {
         }
     }
 
-    importManual() {
+    importManual(fixQuotes = false) {
         if (!this.isManual() || this.controller || this.app.cropTool?.active) return;
         if (!this.manualReady()) {
+            const pasted = this.elements.paste.value;
             this.invalidate('Export the current photo first. An export from another edit or a previous tab session cannot be imported.');
+            if (fixQuotes) this.elements.paste.value = pasted;
             return;
         }
         // Clear an earlier proposal on a failed retry, but retain the unchanged export baseline.
@@ -343,11 +347,17 @@ class ReviewPanel {
         this.elements.result.hidden = true;
         this.elements['apply-bar'].hidden = true;
         try {
-            this.result = ReviewManual.parseResponse(this.elements.paste.value);
+            if (fixQuotes) {
+                const repaired = ReviewManual.repairSmartQuotes(this.elements.paste.value);
+                this.result = repaired.review;
+                this.elements.paste.value = repaired.text;
+            } else {
+                this.result = ReviewManual.parseResponse(this.elements.paste.value);
+            }
             this.showResult();
-            this.setStatus(this.hasSuggestions()
+            this.setStatus((fixQuotes ? 'Smart-quote delimiters fixed; corrected JSON is shown above. ' : '') + (this.hasSuggestions()
                 ? 'ChatGPT review imported. Choose Global or Adaptive, check strength, then Apply. Nothing has changed yet.'
-                : 'ChatGPT review imported. No lighting or color changes were recommended.');
+                : 'ChatGPT review imported. No lighting or color changes were recommended.'));
         } catch (error) {
             this.setStatus(`Cannot import: ${error.message} Copy the complete JSON or ask ChatGPT to correct it using the same prompt. Nothing was applied.`, true);
         }
