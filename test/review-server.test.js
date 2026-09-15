@@ -103,13 +103,43 @@ test('status discloses only configuration/model; no-key review returns no fake r
     let calls = 0;
     const { base, post } = await setup(t, { GEMINI_API_KEY: '' }, async () => { calls++; });
     const status = await fetch(`${base}/api/review/status`);
-    assert.deepEqual(await status.json(), { configured: false, model: 'gemini-3.6-flash' });
+    assert.deepEqual(await status.json(), { configured: false, model: 'gemini-3.6-flash', authorized: true, tokenRequired: false });
     const response = await post();
     assert.equal(response.status, 503);
     const failure = await response.json();
     assert.equal(failure.code, 'not_configured');
     assert.equal(typeof failure.error, 'string');
     assert.equal(calls, 0);
+});
+
+test('Gemini status reports safe credential readiness without exposing keys or calling providers', async t => {
+    let calls = 0;
+    const { base } = await setup(t, { REVIEW_ACCESS_TOKEN: 'test-private-access-token' }, async () => { calls++; });
+    for (const [token, expected] of [['', false], ['wrong', false], ['test-private-access-token', true]]) {
+        const status = await fetch(`${base}/api/review/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await status.json();
+        assert.deepEqual(data, { configured: true, model: 'gemini-3.6-flash', authorized: expected, tokenRequired: true });
+        assert.ok(!JSON.stringify(data).includes('test-private-access-token'));
+        assert.ok(!JSON.stringify(data).includes('test-server-key'));
+    }
+    assert.equal(calls, 0);
+});
+
+test('loopback Gemini cross-origin review requires its own configured token, never the local Qwen token', async t => {
+    let calls = 0;
+    const { base, post } = await setup(t, {
+        REVIEW_ACCESS_TOKEN: '', LOCAL_REVIEW_ACCESS_TOKEN: 'synthetic-local-token',
+        ALLOWED_ORIGINS: 'https://allowed.example',
+    }, async () => { calls++; return upstream(result()); });
+    const headers = { Origin: 'https://allowed.example', Authorization: 'Bearer synthetic-local-token' };
+    const status = await (await fetch(`${base}/api/review/status`, { headers })).json();
+    assert.equal(status.authorized, false);
+    assert.equal(status.tokenRequired, true);
+    const denied = await post(request(), headers);
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).code, 'review_token_required');
+    assert.equal(calls, 0);
+    assert.equal((await post(request(), { Origin: base })).status, 200, 'same-companion tokenless Gemini remains usable');
 });
 
 test('valid critique sends only fixed image/model/schema and returns validated absolute HSL targets', async t => {
@@ -134,11 +164,11 @@ test('valid critique sends only fixed image/model/schema and returns validated a
     assert.equal(payload.generationConfig.responseJsonSchema.additionalProperties, false);
     assert.deepEqual(payload.generationConfig.responseJsonSchema, geminiReviewSchema);
     assert.match(payload.systemInstruction.parts[0].text, /ABSOLUTE targets/);
-    assert.equal(payload.systemInstruction.parts[0].text, systemInstruction);
+    assert.equal(payload.systemInstruction.parts[0].text, require('../server/prompt.js').geminiSystemInstruction);
     assert.ok(payload.systemInstruction.parts[0].text.includes(critiqueRubric));
     assert.equal(payload.systemInstruction.parts[0].text.includes(input.intent), false);
     const status = await (await fetch(`${base}/api/review/status`)).json();
-    assert.deepEqual(status, { configured: true, model: 'gemini-3.6-flash' });
+    assert.deepEqual(status, { configured: true, model: 'gemini-3.6-flash', authorized: true, tokenRequired: false });
 });
 
 test('unauthorized and unallowed origins are rejected before invoking Gemini', async t => {

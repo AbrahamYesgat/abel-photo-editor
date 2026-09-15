@@ -6,6 +6,7 @@ const http = require('node:http');
 const { once } = require('node:events');
 const { createServer, loadConfig, MAX_BODY_BYTES } = require('../server/index.js');
 const { isLoopback } = require('../server/local.js');
+const { localRequest } = require('../server/local-transport.js');
 const { controls, reviewSchema, reviewCategories } = require('../js/review-contract.js');
 const { systemInstruction } = require('../server/prompt.js');
 
@@ -46,12 +47,12 @@ test('local validates soft adaptive masks using the same contract, with no cloud
     assert.equal(request.messages[0].content, systemInstruction);
 });
 
-async function setup(t, env = {}, fetchImpl = mock, host = '127.0.0.1') {
+async function setup(t, env = {}, fetchImpl = mock, host = '127.0.0.1', localFetch) {
     const calls = [];
     const server = createServer({ env, fetch: async (url, options) => {
         calls.push({ url, ...options });
         return fetchImpl(url, options);
-    } });
+    }, localFetch });
     server.listen(0, host);
     await once(server, 'listening');
     t.after(async () => {
@@ -97,7 +98,9 @@ test('local status is exact and live; no Google key is needed', async t => {
     const { status, calls, base } = await setup(t);
     assert.deepEqual(await (await status()).json(), { provider: 'ollama', model, ready: true, localOnly: true });
     assert.deepEqual(calls.map(call => call.url), ['http://127.0.0.1:11434/api/tags', 'http://127.0.0.1:11434/api/show']);
-    assert.deepEqual(await (await fetch(`${base}/api/review/status`)).json(), { configured: false, model: 'gemini-3.6-flash' });
+    assert.deepEqual(await (await fetch(`${base}/api/review/status`)).json(), {
+        configured: false, model: 'gemini-3.6-flash', authorized: true, tokenRequired: false,
+    });
     await status();
     assert.equal(calls.length, 4, 'Status checks installed model every time');
 });
@@ -199,6 +202,31 @@ test('local transport timeouts are not mislabeled as a missing Ollama service', 
     const response = await status();
     assert.equal(response.status, 504);
     assert.equal((await response.json()).code, 'local_timeout');
+});
+
+test('native local transport produces a complete validated review without invoking cloud fetch', async t => {
+    const upstream = http.createServer(async (req, res) => {
+        req.resume();
+        const response = await mock(`http://127.0.0.1:11434${req.url}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(await response.text());
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+    t.after(() => {
+        upstream.closeAllConnections();
+        return new Promise(resolve => upstream.close(resolve));
+    });
+    const localFetch = (url, options) => localRequest(url, options, (target, init, callback) => {
+        target.port = upstream.address().port;
+        return http.request(target, init, callback);
+    });
+    const { post, calls } = await setup(t, {}, () => assert.fail('Must not invoke cloud fetch'),
+        '127.0.0.1', localFetch);
+    const response = await post();
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), result());
+    assert.equal(calls.length, 0);
 });
 
 test('non-loopback requester socket is denied even when forwarding headers claim loopback', async t => {

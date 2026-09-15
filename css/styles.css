@@ -1676,3 +1676,10 @@ html, body {
 }
 
 .lib-folder-path::before { content: '📁'; }
+.review-region-map {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 8px 0;
+    border-radius: 4px;
+}

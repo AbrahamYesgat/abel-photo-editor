@@ -17,6 +17,9 @@ class ReviewPanel {
             'provider', 'provider-badge', 'provider-note', 'connection-title',
             'cloud-settings', 'local-settings', 'local-endpoint', 'local-token',
             'check-local', 'local-token-field', 'remember-local', 'local-storage-status', 'forget-local',
+            'check-gemini', 'token-field', 'remember-gemini', 'gemini-storage-status', 'forget-gemini',
+            'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
+            'manual-choice', 'manual-strength',
             'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
             'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
@@ -24,6 +27,23 @@ class ReviewPanel {
         }
         const el = this.elements;
         el['local-endpoint'].value = this.localDefault();
+        el.endpoint.value = window.location.origin;
+        el.intent.value = this.defaultIntent();
+        el['check-gemini'].addEventListener('click', () => this.checkGeminiConnection());
+        el['forget-gemini'].addEventListener('click', () => this.forgetGeminiConnection());
+        el['remember-gemini'].addEventListener('change', () => {
+            if (!el['remember-gemini'].checked) {
+                const token = this.savedGeminiConnection?.token || el.token.value;
+                this.forgetGeminiConnection();
+                el.token.value = token;
+            }
+        });
+        for (const field of ['gemini-mode', 'gemini-strength']) {
+            el[field].addEventListener(field === 'gemini-mode' ? 'change' : 'input', () => {
+                this.invalidate('Review action or strength changed. Click the new action when ready.');
+                el['gemini-strength-value'].value = `${el['gemini-strength'].value}%`;
+            });
+        }
         el.provider.addEventListener('change', () => this.changeProvider());
         el['check-local'].addEventListener('click', () => this.checkLocalConnection());
         el['forget-local'].addEventListener('click', () => this.forgetLocalConnection());
@@ -35,6 +55,17 @@ class ReviewPanel {
             }
         });
         window.addEventListener('storage', event => {
+            if (event.key === null || event.key === this.geminiStorageKey()) {
+                this.savedGeminiConnection = null;
+                el.token.value = '';
+                if (!this.isLocal() && !this.isManual()) {
+                    this.invalidate('Saved Gemini connection changed in another tab. Reload or check the connection again.');
+                    el.consent.checked = false;
+                }
+                this.geminiStorageStatus('Saved connection changed in another tab. Reload to use it, or Forget to clear it.');
+                this.renderGeminiConnection();
+                this.updateButtons();
+            }
             if (event.key !== null && event.key !== this.localStorageKey()) return;
             if (this.isLocal()) {
                 this.invalidate('Saved local connection changed in another tab. Check the connection again when ready.');
@@ -81,6 +112,7 @@ class ReviewPanel {
                     this.localModel = null;
                 }
                 if (field === 'local-endpoint') this.forgetLocalConnection();
+                if (field === 'endpoint') this.forgetGeminiConnection();
                 this.updateButtons();
             });
         }
@@ -90,8 +122,149 @@ class ReviewPanel {
             this.updateButtons();
         });
         app._bindHoldCompare(el.compare, false, true);
+        this.restoreGeminiConnection();
         this.restoreLocalConnection();
         this.updateButtons();
+    }
+
+    defaultIntent() {
+        return 'Preserve the scene’s existing mood and intentional styling. Make only clearly justified lighting and color refinements.';
+    }
+
+    geminiStorageKey() { return 'abel.gemini-connection.v1'; }
+
+    geminiStorageStatus(message, error = false) {
+        this.elements['gemini-storage-status'].textContent = message;
+        this.elements['gemini-storage-status'].classList.toggle('review-error', error);
+    }
+
+    renderGeminiConnection() {
+        this.elements['token-field'].hidden = !!this.savedGeminiConnection;
+        this.elements['forget-gemini'].hidden = !this.savedGeminiConnection && !this.geminiStorageIssue;
+    }
+
+    restoreGeminiConnection() {
+        try {
+            const raw = window.localStorage.getItem(this.geminiStorageKey());
+            if (raw !== null) {
+                const saved = JSON.parse(raw);
+                if (!saved || saved.version !== 1 || typeof saved.endpoint !== 'string' ||
+                    !saved.endpoint || saved.endpoint.length > 2048 || typeof saved.token !== 'string' ||
+                    !/^[\x21-\x7e]{0,4096}$/.test(saved.token) ||
+                    Object.keys(saved).sort().join(',') !== 'endpoint,token,version') throw new Error('Invalid saved connection');
+                const endpoint = this.validatedEndpoint(saved.endpoint, false);
+                this.savedGeminiConnection = { version: 1, endpoint, token: saved.token };
+                this.elements.endpoint.value = endpoint;
+                this.elements.token.value = '';
+                this.elements['remember-gemini'].checked = true;
+                this.geminiStorageStatus('Saved Gemini connection filled. Consent and a click are still required; no photo has been sent.');
+            }
+        } catch {
+            this.geminiStorageIssue = true;
+            this.geminiStorageStatus('Saved Gemini connection is invalid or storage is unavailable. Enter the connection again, or Forget to clear it.', true);
+        }
+        this.renderGeminiConnection();
+    }
+
+    geminiAccessToken() {
+        if (this.savedGeminiConnection) {
+            if (this.endpoint() !== this.savedGeminiConnection.endpoint) {
+                throw new Error('The saved token belongs to a different Gemini backend. Forget / change Gemini connection first.');
+            }
+            return this.savedGeminiConnection.token;
+        }
+        return this.elements.token.value.trim();
+    }
+
+    rememberGeminiConnection(endpoint) {
+        if (!this.elements['remember-gemini'].checked) return;
+        const token = this.geminiAccessToken();
+        try {
+            if (!/^[\x21-\x7e]{0,4096}$/.test(token)) throw new Error('Invalid token');
+            const saved = { version: 1, endpoint: this.validatedEndpoint(endpoint, false), token };
+            window.localStorage.setItem(this.geminiStorageKey(), JSON.stringify(saved));
+            this.savedGeminiConnection = saved;
+            this.elements.token.value = '';
+            this.geminiStorageIssue = false;
+            this.geminiStorageStatus('Gemini connection saved on this browser. Forget removes its saved access token.');
+        } catch {
+            this.geminiStorageIssue = true;
+            this.geminiStorageStatus('Connected in this tab, but browser storage could not save the connection.', true);
+        }
+        this.renderGeminiConnection();
+    }
+
+    forgetGeminiConnection() {
+        this.invalidate('Gemini credentials cleared. Existing photo edits are unchanged.');
+        this.elements.consent.checked = false;
+        this.savedGeminiConnection = null;
+        this.elements.token.value = '';
+        this.elements['provider-badge'].textContent = this.isLocal() ? 'Local Qwen' : this.isManual() ? 'ChatGPT Manual' : 'Gemini Cloud';
+        try {
+            window.localStorage.removeItem(this.geminiStorageKey());
+            this.geminiStorageIssue = false;
+            this.geminiStorageStatus('Not saved on this browser. Check the new connection when ready.');
+        } catch {
+            this.geminiStorageIssue = true;
+            this.geminiStorageStatus('Cleared from this tab, but storage could not be cleared. Remove this site’s stored data in browser settings.', true);
+        }
+        this.renderGeminiConnection();
+        this.updateButtons();
+    }
+
+    async checkGeminiConnection() {
+        if (this.isLocal() || this.isManual() || this.controller) return;
+        let controller, timeout;
+        try {
+            const endpoint = this.endpoint();
+            const token = this.geminiAccessToken();
+            this.invalidate('Checking Gemini backend configuration. No photo is sent.');
+            controller = new AbortController();
+            this.controller = controller;
+            this.checkingConnection = true;
+            this.updateButtons();
+            timeout = setTimeout(() => controller.abort(), 15000);
+            const response = await fetch(`${endpoint}/status`, {
+                headers: this.requestHeaders(), signal: controller.signal,
+                credentials: 'omit', redirect: 'error',
+            });
+            if (!response.headers.get('content-type')?.includes('application/json')) {
+                throw new Error('No Gemini backend here. GitHub Pages needs your actual HTTPS backend URL, or an explicitly configured desktop companion; it cannot be discovered automatically.');
+            }
+            const data = await response.json();
+            if (this.controller !== controller) return;
+            if (this.isLocal() || this.isManual() || this.endpoint() !== endpoint || this.geminiAccessToken() !== token) {
+                this.invalidate('Gemini connection changed during the check. Check it again before saving.');
+                return;
+            }
+            if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gemini connection failed.');
+            if (typeof data.configured !== 'boolean' || typeof data.model !== 'string' ||
+                !/^gemini-[a-z0-9.-]{1,80}$/.test(data.model) || typeof data.authorized !== 'boolean') {
+                throw new Error('This address did not identify an updated ABEL Gemini backend.');
+            }
+            this.elements['provider-badge'].textContent = data.model;
+            if (!data.configured) throw new Error('Set GEMINI_API_KEY on this backend and restart it. The API key is never filled into the browser.');
+            if (!data.authorized) throw new Error('This backend requires a valid REVIEW_ACCESS_TOKEN. Enter that token, not a local Qwen token or Gemini API key; cross-origin use requires server configuration.');
+            this.rememberGeminiConnection(endpoint);
+            this.setStatus(`${data.model} is configured on this backend. No photo or Google request was sent. This check cannot verify Gemini quota or generation access.`);
+        } catch (error) {
+            if (controller && this.controller !== controller) return;
+            this.setStatus(error.name === 'AbortError' ? 'Gemini connection check timed out.' :
+                error instanceof TypeError ? 'Cannot reach the Gemini backend. Check its URL, allowed origin and browser local-network permission.' : error.message, true);
+            this.elements.connection.open = true;
+        } finally {
+            clearTimeout(timeout);
+            if (this.controller === controller) {
+                this.controller = null;
+                this.checkingConnection = false;
+            }
+            this.updateButtons();
+        }
+    }
+
+    geminiAction() {
+        return !this.isLocal() && !this.isManual() && ['global', 'adaptive'].includes(this.elements['gemini-mode'].value)
+            ? this.elements['gemini-mode'].value : '';
     }
 
     localStorageKey() {
@@ -199,6 +372,12 @@ class ReviewPanel {
 
     changeProvider() {
         this.app._stopComparison();
+        if (this.elements.intent.value === this.defaultIntent() && (this.isLocal() || this.isManual())) {
+            this.elements.intent.value = '';
+            this.defaultIntentRemoved = true;
+        } else if (!this.isLocal() && !this.isManual() && !this.elements.intent.value && this.defaultIntentRemoved) {
+            this.elements.intent.value = this.defaultIntent();
+        }
         this.elements.consent.checked = false;
         this.invalidate(this.isManual()
             ? 'Export this edit first. Upload the downloaded preview and prompt yourself in ChatGPT, then paste its JSON here.'
@@ -231,7 +410,7 @@ class ReviewPanel {
     }
 
     requestHeaders() {
-        const token = this.isLocal() ? this.localAccessToken() : this.elements.token.value.trim();
+        const token = this.isLocal() ? this.localAccessToken() : this.geminiAccessToken();
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers.Authorization = `Bearer ${token}`;
         return headers;
@@ -350,8 +529,17 @@ class ReviewPanel {
     updateButtons() {
         const el = this.elements;
         const busy = !!this.controller;
+        const gemini = !this.isManual() && !this.isLocal();
+        const action = this.geminiAction();
+        el['gemini-options'].hidden = !gemini;
+        el['intent-note'].hidden = !gemini;
+        el['check-gemini'].disabled = busy;
+        el['manual-choice'].hidden = !!action;
+        el['manual-strength'].hidden = !!action;
+        el.apply.hidden = !!action;
         el.analyze.disabled = this.isManual() || !this.app.image || !el.consent.checked || busy || !!this.app.cropTool?.active;
-        el.analyze.textContent = busy ? (this.checkingConnection ? 'Checking...' : 'Reviewing...') : 'Review photo';
+        el.analyze.textContent = busy ? (this.checkingConnection ? 'Checking...' : 'Reviewing...')
+            : action ? `Review & apply ${action === 'adaptive' ? 'Adaptive' : 'Global'}` : 'Review photo';
         el['check-local'].disabled = busy;
         el.cancel.hidden = !busy;
         el.apply.disabled = busy || !!this.app.cropTool?.active || !this.result || !this.matches(this.context) ||
@@ -545,6 +733,15 @@ class ReviewPanel {
         let timedOut = false;
         let connectionIssue = true;
         const localProvider = this.isLocal();
+        const action = this.geminiAction();
+        const requestSettings = JSON.stringify({
+            provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
+            intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value,
+        });
+        const settingsUnchanged = () => requestSettings === JSON.stringify({
+            provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
+            intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value,
+        });
         try {
             const endpoint = this.endpoint();
             this.invalidate('Preparing your current edit...');
@@ -560,6 +757,7 @@ class ReviewPanel {
             this.updateButtons();
             this.setStatus(localProvider
                 ? 'Qwen is reviewing locally. First use loads the model; CPU processing can take several minutes. Cancel anytime. Nothing is sent to Google.'
+                : action ? `Gemini is reviewing your photo, then applying only ${action === 'adaptive' ? 'Adaptive' : 'Global'}. Cancel to stop.`
                 : 'Gemini is reviewing your photo. You can cancel; no changes are applied automatically.');
             timeout = setTimeout(() => { timedOut = true; controller.abort(); }, localProvider ? 910000 : 75000);
             const headers = this.requestHeaders();
@@ -573,15 +771,23 @@ class ReviewPanel {
                     : 'No review backend found. GitHub Pages cannot run Gemini; connect your backend URL above.');
             }
             const data = await response.json();
-            connectionIssue = ['unauthorized', 'origin_denied', 'local_token_required', 'local_unauthorized'].includes(data.code);
+            connectionIssue = ['unauthorized', 'origin_denied', 'review_token_required', 'local_token_required', 'local_unauthorized'].includes(data.code);
             if (!response.ok) {
                 throw new Error(typeof data.error === 'string' ? data.error : `Review failed (${response.status}).`);
             }
-            if (this.controller !== controller || !this.matches(this.context)) return;
+            if (this.controller !== controller) return;
+            if (!this.matches(this.context) || !settingsUnchanged() || !el.consent.checked || this.app.cropTool?.active) {
+                this.invalidate('Photo, review settings or consent changed. Nothing was applied; request a fresh review.');
+                return;
+            }
             this.result = ReviewContract.validateReview(data);
             if (localProvider) this.rememberLocalConnection(endpoint);
-            this.showResult();
-            this.setStatus(this.hasSuggestions()
+            else this.rememberGeminiConnection(endpoint);
+            this.showResult(action, localProvider ? '100' : el['gemini-strength'].value);
+            if (action) {
+                if (this.hasChanges()) this.apply();
+                else this.setStatus(`Review complete. ${action === 'adaptive' ? 'Adaptive' : 'Global'} has no changes at this strength; nothing was applied. The other alternative was not substituted.`);
+            } else this.setStatus(this.hasSuggestions()
                 ? 'Review ready. Select Global or Adaptive, check strength and suggestions, then Apply. Nothing has changed yet.'
                 : 'Review ready. No lighting or color changes were recommended.');
         } catch (error) {
@@ -619,7 +825,7 @@ class ReviewPanel {
         this.elements.feedback.append(list);
     }
 
-    showResult() {
+    showResult(selection = '', strength = '100') {
         const el = this.elements;
         const result = this.result;
         el.feedback.replaceChildren();
@@ -643,10 +849,10 @@ class ReviewPanel {
         el.feedback.append(this.text('p', result.portfolioVerdict.reason));
         el.result.hidden = false;
         el['apply-bar'].hidden = !this.hasSuggestions();
-        this.selection = '';
-        el.alternative.value = '';
-        el.strength.value = '100';
-        el['strength-value'].value = '100%';
+        this.selection = selection;
+        el.alternative.value = selection;
+        el.strength.value = strength;
+        el['strength-value'].value = `${strength}%`;
         this.showAdjustments();
     }
 
@@ -714,6 +920,7 @@ class ReviewPanel {
             row.className = 'review-adjustment';
             row.append(this.text('strong', `${region.name} — soft ${region.geometry.type}`));
             row.append(this.text('p', region.reason));
+            this.showRegionMap(row, region);
             const g = region.geometry;
             row.append(this.text('p', g.type === 'radial'
                 ? `Center ${Math.round(g.x * 100)}%, ${Math.round(g.y * 100)}%; radii ${Math.round(g.width * 100)}%, ${Math.round(g.height * 100)}%; feather ${Math.round(g.feather * 100)}%.`
@@ -723,6 +930,45 @@ class ReviewPanel {
             }
             container.append(row);
         }
+    }
+
+    showRegionMap(container, region) {
+        const composite = document.getElementById('composite-overlay');
+        const source = composite && composite.style.display !== 'none'
+            ? composite : document.getElementById('main-canvas');
+        if (!source?.width || !source?.height) return;
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 320 / Math.max(source.width, source.height));
+        canvas.width = Math.max(1, Math.round(source.width * scale));
+        canvas.height = Math.max(1, Math.round(source.height * scale));
+        canvas.className = 'review-region-map';
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', `${region.name}: approximate mask extent on the reviewed photo. Not a subject selection.`);
+        const ctx = canvas.getContext('2d'), g = region.geometry;
+        const w = canvas.width, h = canvas.height;
+        ctx.drawImage(source, 0, 0, w, h);
+        ctx.strokeStyle = '#ffcf54';
+        ctx.fillStyle = '#ffcf54';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (g.type === 'radial') {
+            ctx.ellipse(g.x * w, g.y * h, g.width * w, g.height * h, 0, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.fillRect(g.x * w - 2, g.y * h - 2, 4, 4);
+        } else {
+            ctx.moveTo(g.x * w, g.y * h);
+            ctx.lineTo(g.endX * w, g.endY * h);
+            ctx.stroke();
+            ctx.font = '12px sans-serif';
+            for (const [text, x, y] of [['0%', g.x, g.y], ['100%', g.endX, g.endY]]) {
+                ctx.fillRect(x * w - 2, y * h - 2, 4, 4);
+                ctx.fillText(text, Math.max(2, Math.min(w - 34, x * w)), Math.max(13, Math.min(h - 2, y * h)));
+            }
+        }
+        container.append(canvas);
+        container.append(this.text('p', g.type === 'radial'
+            ? 'Region map: dot = strongest effect; outline = zero-effect edge. Soft falloff inside, not an object outline.'
+            : 'Region map: 0% → 100% effect across the entire image; beyond the full-effect end it stays at 100%.', 'review-note'));
     }
 
     apply() {

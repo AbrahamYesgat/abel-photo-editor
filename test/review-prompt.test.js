@@ -56,3 +56,18 @@ test('both providers share bounded optional soft-region instructions without seg
     }
     assert.ok(systemInstruction.includes(JSON.stringify(require('../js/review-contract.js').maskControls)));
 });
+
+test('localization specifies image-grounded extents, radii conversion, gradient spill and uncertain-region omission', () => {
+    for (const rule of ['origin top-left', 'x rightward, y downward', 'width=(R-L)/2',
+        'height=(B-T)/2', 'width=0.10, height=0.20', 'four ellipse edges',
+        'cannot be localized confidently, OMIT it', 'full-effect half-plane',
+        'actual attached preview', 'strongest effect', 'zero']) {
+        assert.ok(systemInstruction.includes(rule), rule);
+    }
+    const { geminiSystemInstruction } = require('../server/prompt.js');
+    assert.ok(geminiSystemInstruction.startsWith(systemInstruction));
+    assert.match(geminiSystemInstruction, /GEMINI DETAILED IMAGE AUDIT/);
+    assert.match(geminiSystemInstruction, /two or three focused sentences/);
+    assert.match(geminiSystemInstruction, /more thorough in diagnosis, not more aggressive/);
+    assert.ok(!systemInstruction.includes('GEMINI DETAILED IMAGE AUDIT'), 'local context does not grow by the Gemini-only audit');
+});

@@ -79,6 +79,9 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         'strength', 'apply-bar', 'result', 'provider', 'provider-badge', 'provider-note',
         'connection-title', 'connection', 'cloud-settings', 'local-settings', 'check-local',
         'local-token-field', 'remember-local', 'local-storage-status', 'forget-local',
+        'check-gemini', 'token-field', 'remember-gemini', 'gemini-storage-status', 'forget-gemini',
+        'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
+        'manual-choice', 'manual-strength',
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
@@ -86,6 +89,8 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         review.elements[name] = element();
     }
     review.elements.provider.value = 'gemini';
+    review.elements['gemini-mode'].value = initialize ? 'global' : 'review';
+    review.elements['remember-gemini'].checked = false;
     for (const name of ['endpoint', 'token', 'local-endpoint', 'local-token', 'intent']) {
         review.elements[name].value = '';
     }
@@ -121,6 +126,297 @@ function prepare(review, changes) {
     review.result = ReviewContract.validateReview(response(changes));
     review.selection = 'global';
 }
+
+function geminiHarness(options) {
+    const fixture = harness({ initialize: true, ...options });
+    fixture.review.preview = () => 'synthetic-preview';
+    fixture.context.ReviewContract = { ...ReviewContract, validateRequest() {} };
+    fixture.review.elements.consent.checked = true;
+    return fixture;
+}
+
+test('Gemini defaults fill safely without network, invented backend, saved intent or upload consent', () => {
+    const { review, storage } = harness({ initialize: true });
+    assert.equal(review.elements.endpoint.value, 'http://localhost:3000');
+    assert.equal(review.elements.token.value, '');
+    assert.equal(review.elements.intent.value, review.defaultIntent());
+    assert.equal(review.elements['gemini-mode'].value, 'global');
+    assert.equal(review.elements['gemini-strength'].value, '100');
+    assert.equal(review.elements.consent.checked, false);
+    assert.equal(review.elements['remember-gemini'].checked, false);
+    assert.equal(review.elements.analyze.disabled, true);
+    assert.equal(review.elements.analyze.textContent, 'Review & apply Global');
+    assert.equal(review.controller, null);
+    assert.equal(storage.values.size, 0);
+});
+
+test('one Gemini click applies exactly the selected alternative once, retaining undo and compare', async () => {
+    for (const mode of ['global', 'adaptive']) {
+        const { app, review, context } = geminiHarness();
+        review.elements['gemini-mode'].value = mode;
+        review.elements['gemini-strength'].value = '50';
+        const baseline = review.snapshot().edits;
+        const result = response([{ key: 'exposure', value: 0.8, reason: 'Lift midtones.' }]);
+        result.adaptive = { adjustments: [{ key: 'temperature', value: 8, reason: 'Warm light.' }], regions: [adaptiveRegion()] };
+        let finish, requests = 0;
+        context.fetch = () => { requests++; return new Promise(resolve => { finish = resolve; }); };
+        const pending = review.analyze();
+        await review.analyze();
+        assert.equal(app.state.exposure, 0, 'no edit before a validated response');
+        finish(Response.json(result));
+        await pending;
+        assert.equal(requests, 1);
+        assert.equal(review.selection, mode);
+        assert.equal(app.state.exposure, mode === 'global' ? 0.4 : 0);
+        assert.equal(app.state.temperature, mode === 'adaptive' ? 4 : 0);
+        assert.equal(app.maskEngine.masks.length, mode === 'adaptive' ? 1 : 0);
+        if (mode === 'adaptive') assert.equal(app.maskEngine.masks[0].adjustments.exposure, 0.3);
+        assert.equal(review.elements.apply.hidden, true);
+        assert.equal(review.elements['manual-choice'].hidden, true);
+        assert.equal(review.canCompare(), true);
+        assert.match(review.elements.status.textContent, /applied/i);
+        const historyLength = app.history.length;
+        review.apply();
+        assert.equal(app.history.length, historyLength);
+        app._undo();
+        assert.equal(review.snapshot().edits, baseline);
+        app._redo();
+        assert.equal(review.canCompare(), true);
+    }
+});
+
+test('Gemini review-only remains manual and selected empty or zero-strength recipes never substitute alternatives', async () => {
+    for (const mode of ['review', 'adaptive', 'global']) {
+        const { app, review, context } = geminiHarness();
+        review.elements['gemini-mode'].value = mode;
+        if (mode === 'global') review.elements['gemini-strength'].value = '0';
+        const baseline = review.snapshot().edits;
+        const historyLength = app.history.length;
+        context.fetch = async () => Response.json(response([{ key: 'exposure', value: 0.5, reason: 'Lift.' }]));
+        await review.analyze();
+        assert.equal(review.snapshot().edits, baseline);
+        assert.equal(app.history.length, historyLength);
+        assert.equal(review.canCompare(), false);
+        assert.match(review.elements.status.textContent, mode === 'review' ? /Nothing has changed/ : /nothing was applied/);
+        assert.equal(review.elements.apply.hidden, mode !== 'review');
+    }
+});
+
+test('Gemini never auto-applies cancelled, stale, switched, revoked or superseded async responses', async () => {
+    const mutations = [
+        (r, a) => { a.state.exposure = 0.2; },
+        (r, a) => { a.image = {}; },
+        (r, a) => { a.imageWidth = 300; },
+        (r, a) => { a.curveEditor.channels.rgb[1].y = 220; },
+        (r, a) => { a.maskEngine.createMask('brush'); },
+        (r, a) => { a.cropTool = { active: true }; },
+        r => { r.elements.intent.value = 'Different intent'; },
+        r => { r.elements['gemini-mode'].value = 'adaptive'; },
+        r => { r.elements['gemini-strength'].value = '25'; },
+        r => { r.elements.consent.checked = false; },
+        r => { r.elements.endpoint.value = 'https://different.example'; },
+        r => { r.elements.token.value = 'different-test-token'; },
+        r => { r.elements.provider.value = 'local'; r.changeProvider(); },
+        r => { r.elements.provider.value = 'manual'; r.changeProvider(); },
+        r => r.elements.cancel.dispatch('click'),
+        r => { r.elements['gemini-mode'].value = 'adaptive'; r.elements['gemini-mode'].dispatch('change'); },
+        r => { r.elements['gemini-strength'].value = '25'; r.elements['gemini-strength'].dispatch('input'); },
+    ];
+    for (const mutate of mutations) {
+        const { review, app, context } = geminiHarness();
+        let finish;
+        context.fetch = () => new Promise(resolve => { finish = resolve; });
+        const pending = review.analyze();
+        mutate(review, app);
+        const changedBaseline = review.snapshot().edits;
+        const historyLength = app.history.length;
+        finish(Response.json(response([{ key: 'exposure', value: 0.6, reason: 'Lift.' }])));
+        await pending;
+        assert.equal(review.snapshot().edits, changedBaseline);
+        assert.equal(app.history.length, historyLength);
+        assert.equal(review.result, null);
+        assert.equal(review.canCompare(), false);
+    }
+});
+
+test('late cancelled Gemini response cannot overwrite a newer completed one-click request', async () => {
+    const { review, app, context } = geminiHarness();
+    let finish;
+    context.fetch = () => new Promise(resolve => { finish = resolve; });
+    const old = review.analyze();
+    review.elements.cancel.dispatch('click');
+    context.fetch = async () => Response.json(response([{ key: 'exposure', value: 0.3, reason: 'New result.' }]));
+    await review.analyze();
+    finish(Response.json(response([{ key: 'exposure', value: 0.9, reason: 'Old result.' }])));
+    await old;
+    assert.equal(app.state.exposure, 0.3);
+    assert.equal(review.canCompare(), true);
+});
+
+test('Gemini provider, schema and allocation errors leave edits unchanged and never report applied success', async () => {
+    for (const failure of ['quota', 'malformed', 'allocation']) {
+        const { review, app, context } = geminiHarness();
+        review.elements['gemini-mode'].value = 'adaptive';
+        const baseline = review.snapshot().edits;
+        const result = response([]);
+        result.adaptive.regions = [adaptiveRegion()];
+        if (failure === 'allocation') app.maskEngine.buildReviewMasks = () => { throw new Error('Allocation failed'); };
+        context.fetch = async () => failure === 'quota'
+            ? Response.json({ error: 'Quota exhausted', code: 'provider_rate_limited' }, { status: 429 })
+            : Response.json(failure === 'malformed' ? { ...result, crop: {} } : result);
+        await review.analyze();
+        assert.equal(review.snapshot().edits, baseline);
+        assert.equal(review.canCompare(), false);
+        assert.doesNotMatch(review.elements.status.textContent, /Adaptive applied|Lighting and color applied/);
+    }
+});
+
+const geminiKey = 'abel.gemini-connection.v1';
+const geminiReady = () => Response.json({ configured: true, model: 'gemini-3.6-flash', authorized: true, tokenRequired: true });
+
+test('Gemini connection check autofills model and opt-in saves only verified URL and token, hidden on reload', async () => {
+    for (const token of ['', 'synthetic-gemini-access-token']) {
+        const { review, context, storage } = geminiHarness();
+        review.elements.endpoint.value = 'https://backend.example';
+        review.elements.token.value = token;
+        review.elements['remember-gemini'].checked = true;
+        review.elements.consent.checked = false;
+        context.fetch = async (url, options) => {
+            assert.equal(url, 'https://backend.example/api/review/status');
+            assert.equal(options.body, undefined);
+            assert.equal(options.redirect, 'error');
+            assert.equal(options.credentials, 'omit');
+            assert.equal(storage.values.size, 0);
+            return geminiReady();
+        };
+        await review.checkGeminiConnection();
+        assert.equal(review.elements['provider-badge'].textContent, 'gemini-3.6-flash');
+        assert.deepEqual(JSON.parse(storage.getItem(geminiKey)), {
+            version: 1, endpoint: 'https://backend.example/api/review', token,
+        });
+        const restored = harness({ storage, initialize: true }).review;
+        assert.equal(restored.elements.endpoint.value, 'https://backend.example/api/review');
+        assert.equal(restored.elements.token.value, '');
+        assert.equal(restored.elements['token-field'].hidden, true);
+        assert.equal(restored.elements.consent.checked, false);
+        assert.equal(restored.geminiAccessToken(), token);
+        assert.equal(restored.controller, null);
+        restored.elements.endpoint.value = 'https://other.example';
+        assert.throws(() => restored.geminiAccessToken(), /different Gemini backend/);
+        restored.elements['forget-gemini'].dispatch('click');
+        assert.equal(storage.getItem(geminiKey), null);
+        assert.equal(restored.elements['token-field'].hidden, false);
+    }
+});
+
+test('Gemini storage is opt-in and failed or outdated status never persists credentials', async () => {
+    for (const [remember, result] of [
+        [false, () => geminiReady()],
+        [true, () => Response.json({ configured: true, model: 'gemini-3.6-flash' })],
+        [true, () => Response.json({ configured: false, model: 'gemini-3.6-flash', authorized: true })],
+        [true, () => Response.json({ configured: true, model: 'gemini-3.6-flash', authorized: false })],
+        [true, () => new Response('<html>Static website</html>')],
+        [true, () => { throw new TypeError('Offline'); }],
+    ]) {
+        const { review, context, storage } = geminiHarness();
+        review.elements.token.value = 'synthetic-access-token';
+        review.elements['remember-gemini'].checked = remember;
+        context.fetch = async () => result();
+        await review.checkGeminiConnection();
+        assert.equal(storage.getItem(geminiKey), null);
+    }
+});
+
+test('Gemini malformed stored connections cannot supply tokens or restore consent', () => {
+    for (const saved of [
+        'bad json',
+        JSON.stringify({ version: 1, endpoint: 'http://remote.example', token: 'test-token' }),
+        JSON.stringify({ version: 1, endpoint: 'https://user:password@example.com', token: 'test-token' }),
+        JSON.stringify({ version: 1, endpoint: 'https://backend.example?token=test-token', token: 'test-token' }),
+        JSON.stringify({ version: 1, endpoint: 'https://backend.example', token: 'bad\nheader' }),
+        JSON.stringify({ version: 1, endpoint: 'https://backend.example', token: 'test-token', consent: true }),
+    ]) {
+        const storage = memoryStorage();
+        storage.setItem(geminiKey, saved);
+        const { review } = harness({ storage, initialize: true });
+        assert.equal(review.savedGeminiConnection, undefined);
+        assert.equal(review.elements.consent.checked, false);
+        assert.equal(review.geminiAccessToken(), '');
+        assert.match(review.elements['gemini-storage-status'].textContent, /invalid or storage is unavailable/);
+    }
+});
+
+test('Gemini review persists only successful validated responses and never forwards saved cloud tokens to local Qwen', async () => {
+    for (const valid of [true, false]) {
+        const { review, context, storage } = geminiHarness();
+        review.elements.token.value = 'synthetic-gemini-token';
+        review.elements['remember-gemini'].checked = true;
+        context.fetch = async () => Response.json(valid ? response([]) : { error: 'Invalid' });
+        await review.analyze();
+        assert.equal(storage.getItem(geminiKey) !== null, valid);
+        review.elements.provider.value = 'local';
+        review.changeProvider();
+        review.elements['local-token'].value = 'synthetic-local-token';
+        assert.equal(review.requestHeaders().Authorization, 'Bearer synthetic-local-token');
+    }
+});
+
+test('Gemini status cannot save credentials changed programmatically during its response', async () => {
+    for (const field of ['endpoint', 'token']) {
+        const { review, context, storage } = geminiHarness();
+        review.elements['remember-gemini'].checked = true;
+        let finish;
+        context.fetch = () => new Promise(resolve => { finish = resolve; });
+        const pending = review.checkGeminiConnection();
+        review.elements[field].value = field === 'endpoint' ? 'https://changed.example' : 'changed-test-token';
+        finish(geminiReady());
+        await pending;
+        assert.equal(storage.values.size, 0);
+        assert.match(review.elements.status.textContent, /changed during the check/);
+    }
+});
+
+test('Gemini uncheck, storage events, pending Forget and storage failures never leak or silently retain credentials', async () => {
+    const { review, context, storage } = geminiHarness();
+    review.elements.token.value = 'synthetic-access-token';
+    review.elements['remember-gemini'].checked = true;
+    context.fetch = async () => geminiReady();
+    await review.checkGeminiConnection();
+    review.elements['remember-gemini'].checked = false;
+    review.elements['remember-gemini'].dispatch('change');
+    assert.equal(storage.getItem(geminiKey), null);
+    assert.equal(review.geminiAccessToken(), 'synthetic-access-token');
+    review.elements['remember-gemini'].checked = true;
+    await review.checkGeminiConnection();
+    let finish, signal;
+    context.fetch = (url, options) => {
+        signal = options.signal;
+        return new Promise(resolve => { finish = resolve; });
+    };
+    const pending = review.checkGeminiConnection();
+    review.elements['forget-gemini'].dispatch('click');
+    assert.equal(signal.aborted, true);
+    finish(geminiReady());
+    await pending;
+    assert.equal(storage.getItem(geminiKey), null);
+    assert.equal(review.elements.token.value, '');
+    context.window.listeners.storage({ key: geminiKey, newValue: null });
+    assert.equal(review.savedGeminiConnection, null);
+    assert.equal(review.elements.consent.checked, false);
+
+    const blocked = geminiHarness({ storage: {
+        getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); },
+        removeItem() { throw new Error('blocked'); },
+    } });
+    blocked.review.elements.token.value = 'synthetic-access-token';
+    blocked.review.elements['remember-gemini'].checked = true;
+    blocked.context.fetch = async () => geminiReady();
+    await blocked.review.checkGeminiConnection();
+    assert.equal(blocked.review.geminiAccessToken(), 'synthetic-access-token');
+    assert.match(blocked.review.elements['gemini-storage-status'].textContent, /could not save/);
+    blocked.review.forgetGeminiConnection();
+    assert.match(blocked.review.elements['gemini-storage-status'].textContent, /storage could not be cleared/);
+});
 
 test('intent-first review renders new sections safely and shows genuine no-change outcomes', () => {
     const { review } = harness();

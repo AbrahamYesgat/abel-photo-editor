@@ -168,7 +168,6 @@ function createLocalProvider({ config, fetchImpl, SafeError, readUpstream }) {
             }
         };
         try {
-            // Streaming avoids fetch's five-minute wait-for-headers limit on slow CPUs.
             // Extra space covers NDJSON envelopes; review content is bounded separately.
             while (true) {
                 const chunk = await reader.read();

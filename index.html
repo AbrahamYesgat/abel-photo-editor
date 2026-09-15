@@ -194,8 +194,15 @@
                     <p class="review-note">The Gemini key belongs on your server, never here. GitHub Pages needs a connected backend: hosted, or your running local companion.</p>
                     <label for="review-endpoint">Backend URL (blank for this server)</label>
                     <input id="review-endpoint" type="url" placeholder="https://your-backend.example" autocomplete="off">
-                    <label for="review-token">Backend access token (not a Gemini key)</label>
-                    <input id="review-token" type="password" autocomplete="off" spellcheck="false">
+                    <div id="review-token-field">
+                        <label for="review-token">Backend access token (not a Gemini key; only if required)</label>
+                        <input id="review-token" type="password" autocomplete="off" spellcheck="false" aria-describedby="review-gemini-storage-note">
+                    </div>
+                    <label class="review-consent"><input id="review-remember-gemini" type="checkbox" aria-describedby="review-gemini-storage-note">Remember Gemini connection on this browser</label>
+                    <p id="review-gemini-storage-note" class="review-note">Opt in to save the verified backend URL and access token unencrypted in this site's browser storage. Scripts on this site can read it; avoid shared devices. Never enter a Gemini API key. Photo, intent and upload consent are never saved.</p>
+                    <p id="review-gemini-storage-status" class="review-note" role="status">Defaults to this server. Saved connections fill automatically; no remote backend or secret can be discovered.</p>
+                    <button id="review-check-gemini" class="btn btn-outline" type="button">Check Gemini connection</button>
+                    <button id="review-forget-gemini" class="btn btn-outline" type="button" hidden>Forget / change Gemini connection</button>
                     </div>
                     <div id="review-local-settings" hidden>
                         <p class="review-note">Run Ollama and the ABEL companion on this computer. The deployed website can connect here too; Qwen runs locally, not on the website's server.</p>
@@ -214,17 +221,29 @@
                         <button id="review-forget-local" class="btn btn-outline" type="button" hidden>Forget / change connection</button>
                         <p class="review-note">The deployed website requires your companion's local access token and an allowed origin. Your browser may ask for local-network permission. On a phone, localhost means the phone, not your computer.</p>
                     </div>
-                    <p class="review-note">Gemini backend credentials stay in memory for this tab only. Saved local connections never grant photo-processing consent.</p>
+                    <p class="review-note">Saved connections never grant photo-processing consent. Connection checks send no photo and do not call an AI provider.</p>
                 </details>
                 <button id="review-check-local" class="btn btn-outline" hidden>Check local connection</button>
                 <label class="review-field-label" for="review-intent">What are you going for?</label>
                 <textarea id="review-intent" rows="2" maxlength="600" placeholder="Natural colors, moody portrait, warm sunset..."></textarea>
+                <p id="review-intent-note" class="review-note">Gemini's editable default preserves the scene's existing mood; it is not a guess about your intent. Clear it or describe your own goal.</p>
+                <div id="review-gemini-options">
+                    <label class="review-field-label" for="review-gemini-mode">One-click action</label>
+                    <select id="review-gemini-mode">
+                        <option value="global">Review &amp; apply Global</option>
+                        <option value="adaptive">Review &amp; apply Adaptive</option>
+                        <option value="review">Review only — inspect before applying</option>
+                    </select>
+                    <label for="review-gemini-strength">Adjustment strength <output id="review-gemini-strength-value">100%</output></label>
+                    <input id="review-gemini-strength" type="range" class="slider-input" min="0" max="100" step="5" value="100">
+                    <p class="review-note">One click reviews and applies only the selected validated alternative as one undoable edit. Adaptive uses approximate soft regions, not subject segmentation; uncertain regions should be omitted. Inspect the region maps and Masks after applying. No crop or content changes.</p>
+                </div>
                 <label id="review-consent-label" class="review-consent">
                     <input id="review-consent" type="checkbox">
                     <span><span id="review-consent-text">Send a reduced photo preview and my editing intent to the connected server and Google. Free-tier content may be used to improve Google's products.</span> <a id="review-data-terms" href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer">Data terms</a></span>
                 </label>
                 <div class="review-request-actions">
-                    <button id="review-analyze" class="btn btn-accent" disabled>Review photo</button>
+                    <button id="review-analyze" class="btn btn-accent" disabled>Review &amp; apply Global</button>
                     <button id="review-cancel" class="btn btn-outline" hidden>Cancel</button>
                 </div>
                 <section id="review-manual" hidden aria-label="Manual ChatGPT review">
@@ -255,6 +274,7 @@
                 <p id="review-status" class="review-status" role="status" aria-live="polite">Import a photo to get started.</p>
                 <div id="review-result" hidden>
                     <div id="review-feedback"></div>
+                    <div id="review-manual-choice">
                     <h3>Optional edit alternatives</h3>
                     <label class="review-field-label" for="review-alternative">Choose one, from the same current edit</label>
                     <select id="review-alternative">
@@ -263,11 +283,14 @@
                         <option value="adaptive">Adaptive — global base + soft regions</option>
                     </select>
                     <p class="review-note">Global targets are absolute. Adaptive adds up to 3 editable soft radial/linear masks with regional offsets, preserving existing masks. Approximate placement, not precise subject segmentation; spill and overlap are possible. Nothing is applied until you click Apply.</p>
+                    </div>
                     <div id="review-adjustments"></div>
                 </div>
                 <div id="review-apply-bar" class="review-apply-bar" hidden>
+                    <div id="review-manual-strength">
                     <label for="review-strength">Adjustment strength <output id="review-strength-value">100%</output></label>
                     <input id="review-strength" type="range" class="slider-input" min="0" max="100" step="5" value="100">
+                    </div>
                     <div class="review-request-actions">
                         <button id="review-apply" class="btn btn-accent" disabled>Apply changes</button>
                         <button id="review-undo" class="btn btn-outline" disabled>Undo review</button>

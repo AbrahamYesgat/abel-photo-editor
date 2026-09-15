@@ -7,9 +7,10 @@ const { readFile } = require('node:fs/promises');
 const { timingSafeEqual } = require('node:crypto');
 const { validateRequest, validateReview } = require('../js/review-contract.js');
 const { geminiReviewSchema } = require('./schema.js');
-const { systemInstruction } = require('./prompt.js');
+const { geminiSystemInstruction } = require('./prompt.js');
 const { parseJSON } = require('./json.js');
 const { isLoopback, localConfig, sameLocalOrigin, createLocalProvider } = require('./local.js');
+const { localRequest } = require('./local-transport.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -153,7 +154,7 @@ async function review(request, config, fetchImpl, controller) {
                 method: 'POST', signal: controller.signal, redirect: 'error',
                 headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
                 body: JSON.stringify({
-                    systemInstruction: { parts: [{ text: systemInstruction }] },
+                    systemInstruction: { parts: [{ text: geminiSystemInstruction }] },
                     contents: [{ role: 'user', parts: [
                         { inlineData: { mimeType: 'image/jpeg', data: request.image } },
                         { text: JSON.stringify({ adjustments: request.adjustments, intent: request.intent }) }
@@ -203,9 +204,9 @@ async function review(request, config, fetchImpl, controller) {
     }
 }
 
-function createServer({ env = process.env, fetch: fetchImpl = globalThis.fetch } = {}) {
+function createServer({ env = process.env, fetch: fetchImpl, localFetch = fetchImpl ?? localRequest } = {}) {
     const config = loadConfig(env);
-    const local = createLocalProvider({ config, fetchImpl, SafeError, readUpstream });
+    const local = createLocalProvider({ config, fetchImpl: localFetch, SafeError, readUpstream });
     let localActive = 0;
     let active = 0;
     let used = 0;
@@ -233,7 +234,8 @@ function createServer({ env = process.env, fetch: fetchImpl = globalThis.fetch }
                         requested.some(header => !['authorization', 'content-type'].includes(header))) {
                         throw new SafeError(403, 'origin_denied', 'This cross-origin request is not allowed.');
                     }
-                    if (localPath && req.headers.origin && req.headers['access-control-request-private-network'] === 'true') {
+                    if ((localPath || (isLoopback(config.host) && config.accessToken)) &&
+                        req.headers.origin && req.headers['access-control-request-private-network'] === 'true') {
                         res.setHeader('Access-Control-Allow-Private-Network', 'true');
                     }
                     res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -301,14 +303,21 @@ function createServer({ env = process.env, fetch: fetchImpl = globalThis.fetch }
                     }
                     return;
                 }
+                const crossOriginTokenMissing = isLoopback(config.host) && req.headers.origin &&
+                    !sameLocalOrigin(req, config) && !config.accessToken;
+                const geminiAuthorized = !crossOriginTokenMissing && authorized(req, config.accessToken);
                 if (pathname === '/api/review/status' && req.method === 'GET') {
-                    json(res, 200, { configured: Boolean(config.apiKey), model: config.model });
+                    json(res, 200, { configured: Boolean(config.apiKey), model: config.model,
+                        authorized: geminiAuthorized, tokenRequired: !!config.accessToken || !!crossOriginTokenMissing });
                     return;
                 }
                 if (pathname !== '/api/review' || req.method !== 'POST') {
                     throw new SafeError(405, 'method_not_allowed', 'Method not allowed.');
                 }
-                if (!authorized(req, config.accessToken)) {
+                if (crossOriginTokenMissing) {
+                    throw new SafeError(401, 'review_token_required', 'Configure REVIEW_ACCESS_TOKEN on the companion before using cross-origin Gemini review.');
+                }
+                if (!geminiAuthorized) {
                     throw new SafeError(401, 'unauthorized', 'A valid review access token is required.');
                 }
                 if (!config.apiKey) throw unavailable();
@@ -346,7 +355,7 @@ function createServer({ env = process.env, fetch: fetchImpl = globalThis.fetch }
                             controller.abort();
                         }, config.timeoutMs);
                     });
-                    const result = await Promise.race([review(request, config, fetchImpl, controller), timeout]);
+                    const result = await Promise.race([review(request, config, fetchImpl ?? globalThis.fetch, controller), timeout]);
                     json(res, 200, result);
                 } finally {
                     clearTimeout(timer);
