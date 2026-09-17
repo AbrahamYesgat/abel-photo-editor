@@ -11,6 +11,7 @@ const { geminiSystemInstruction } = require('./prompt.js');
 const { parseJSON } = require('./json.js');
 const { isLoopback, localConfig, sameLocalOrigin, createLocalProvider } = require('./local.js');
 const { localRequest } = require('./local-transport.js');
+const { azureConfig, createAzureProvider } = require('./azure.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -65,7 +66,8 @@ function loadConfig(env = process.env) {
         rateWindowMs: positive(env.REVIEW_RATE_WINDOW_MS, 60000, 'REVIEW_RATE_WINDOW_MS'),
         concurrency: positive(env.REVIEW_CONCURRENCY, 2, 'REVIEW_CONCURRENCY', 100),
         timeoutMs: positive(env.REVIEW_TIMEOUT_MS, 30000, 'REVIEW_TIMEOUT_MS', 120000),
-        ...localConfig(env, host, positive)
+        ...localConfig(env, host, positive),
+        ...azureConfig(env, positive)
     };
 }
 function json(res, status, value) {
@@ -207,6 +209,7 @@ async function review(request, config, fetchImpl, controller) {
 function createServer({ env = process.env, fetch: fetchImpl, localFetch = fetchImpl ?? localRequest } = {}) {
     const config = loadConfig(env);
     const local = createLocalProvider({ config, fetchImpl: localFetch, SafeError, readUpstream });
+    const azure = createAzureProvider({ config, fetchImpl: fetchImpl ?? globalThis.fetch, SafeError, readUpstream });
     let localActive = 0;
     let active = 0;
     let used = 0;
@@ -218,8 +221,9 @@ function createServer({ env = process.env, fetch: fetchImpl, localFetch = fetchI
             const pathname = new URL(req.url, 'http://server.invalid').pathname;
             if (pathname.startsWith('/api/')) {
                 const localPath = ['/api/review/local', '/api/review/local/status'].includes(pathname);
+                const azurePath = ['/api/review/azure', '/api/review/azure/status'].includes(pathname);
                 checkOrigin(req, res, config);
-                if (!localPath && !['/api/review', '/api/review/status'].includes(pathname)) {
+                if (!localPath && !azurePath && !['/api/review', '/api/review/status'].includes(pathname)) {
                     throw new SafeError(404, 'not_found', 'Not found.');
                 }
                 if (localPath && (!config.localEnabled || !isLoopback(config.host) ||
@@ -306,12 +310,14 @@ function createServer({ env = process.env, fetch: fetchImpl, localFetch = fetchI
                 const crossOriginTokenMissing = isLoopback(config.host) && req.headers.origin &&
                     !sameLocalOrigin(req, config) && !config.accessToken;
                 const geminiAuthorized = !crossOriginTokenMissing && authorized(req, config.accessToken);
-                if (pathname === '/api/review/status' && req.method === 'GET') {
-                    json(res, 200, { configured: Boolean(config.apiKey), model: config.model,
+                if (['/api/review/status', '/api/review/azure/status'].includes(pathname) && req.method === 'GET') {
+                    json(res, 200, { configured: azurePath ? config.azure.configured : Boolean(config.apiKey),
+                        model: azurePath ? config.azure.model : config.model,
+                        ...(azurePath ? { provider: 'azure', monthlyRequestLimit: config.azure.monthlyLimit } : {}),
                         authorized: geminiAuthorized, tokenRequired: !!config.accessToken || !!crossOriginTokenMissing });
                     return;
                 }
-                if (pathname !== '/api/review' || req.method !== 'POST') {
+                if (!['/api/review', '/api/review/azure'].includes(pathname) || req.method !== 'POST') {
                     throw new SafeError(405, 'method_not_allowed', 'Method not allowed.');
                 }
                 if (crossOriginTokenMissing) {
@@ -320,7 +326,7 @@ function createServer({ env = process.env, fetch: fetchImpl, localFetch = fetchI
                 if (!geminiAuthorized) {
                     throw new SafeError(401, 'unauthorized', 'A valid review access token is required.');
                 }
-                if (!config.apiKey) throw unavailable();
+                if (azurePath ? !config.azure.configured : !config.apiKey) throw unavailable();
                 if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type'] || '') ||
                     (req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity')) {
                     throw new SafeError(415, 'unsupported_media_type', 'Send an uncompressed application/json request.');
@@ -353,9 +359,10 @@ function createServer({ env = process.env, fetch: fetchImpl, localFetch = fetchI
                         timer = setTimeout(() => {
                             reject(new SafeError(504, 'review_timeout', 'The review provider timed out. Please try again.'));
                             controller.abort();
-                        }, config.timeoutMs);
+                        }, azurePath ? config.azure.timeoutMs : config.timeoutMs);
                     });
-                    const result = await Promise.race([review(request, config, fetchImpl ?? globalThis.fetch, controller), timeout]);
+                    const result = await Promise.race([azurePath ? azure.review(request, controller)
+                        : review(request, config, fetchImpl ?? globalThis.fetch, controller), timeout]);
                     json(res, 200, result);
                 } finally {
                     clearTimeout(timer);
@@ -399,7 +406,7 @@ if (require.main === module) {
         const server = createServer();
         server.on('error', () => { console.error('Unable to start review server. Check HOST and PORT.'); process.exitCode = 1; });
         server.listen(config.port, config.host, () => {
-            console.log(`ABEL server listening on port ${config.port}; review ${config.apiKey ? 'configured' : 'not configured'}.`);
+            console.log(`ABEL server listening on port ${config.port}; Gemini ${config.apiKey ? 'configured' : 'not configured'}; Azure ${config.azure.configured ? 'configured' : 'not configured'}.`);
         });
     } catch (error) {
         console.error(error.message);

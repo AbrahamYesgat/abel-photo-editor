@@ -1,10 +1,14 @@
 'use strict';
 
-// Uses an already-installed Playwright; never calls Google, Ollama or an external website.
+// Uses an already-installed Playwright; never calls Google, Azure, Ollama or an external website.
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { createServer } = require('../server/index.js');
 const contract = require('../js/review-contract.js');
+const provider = process.env.REVIEW_PROVIDER || 'gemini';
+assert.ok(['gemini', 'azure'].includes(provider), 'REVIEW_PROVIDER must be gemini or azure');
+const apiPath = `/api/review${provider === 'azure' ? '/azure' : ''}`;
+const model = provider === 'azure' ? 'gpt-5.4' : 'gemini-3.6-flash';
 
 const region = {
     name: 'Upper image-right patch',
@@ -39,12 +43,12 @@ async function run() {
             await page.route('**/*', async route => {
                 const request = route.request();
                 if (!request.url().startsWith(`${base}/`)) return route.abort();
-                if (request.url().endsWith('/api/review/status')) {
+                if (request.url().endsWith(`${apiPath}/status`)) {
                     checks++;
                     assert.equal(request.postData(), null);
-                    return route.fulfill({ json: { configured: true, model: 'gemini-3.6-flash', authorized: true, tokenRequired: false } });
+                    return route.fulfill({ json: { configured: true, model, provider, authorized: true, tokenRequired: false } });
                 }
-                if (request.url().endsWith('/api/review')) {
+                if (request.url().endsWith(apiPath)) {
                     reviews++;
                     contract.validateRequest(request.postDataJSON());
                     return route.fulfill({ json: result });
@@ -67,10 +71,17 @@ async function run() {
                 await app._loadFile(new File([blob], 'synthetic-region.png', { type: 'image/png' }));
             });
             await page.locator(viewport.width < 500 ? '.mobile-tab[data-panel="review"]' : '.vtab[data-panel="review"]').click();
+            if (provider === 'azure') {
+                await page.selectOption('#review-provider', 'azure');
+                assert.equal(await page.isChecked('#review-consent'), false);
+                assert.equal(await page.inputValue('#review-token'), '');
+                assert.match(await page.textContent('#review-consent-text'), /Microsoft Azure/);
+                assert.equal(reviews + checks, 0, 'switching to Azure does not contact a provider');
+            }
             await page.locator('#review-connection').evaluate(node => { node.open = true; });
             await page.check('#review-remember-gemini');
             await page.click('#review-check-gemini');
-            await page.waitForFunction(() => document.getElementById('review-provider-badge').textContent === 'gemini-3.6-flash');
+            await page.waitForFunction(model => document.getElementById('review-provider-badge').textContent === model, model);
             assert.equal(checks, 1);
             assert.equal(reviews, 0);
             assert.equal(await page.isChecked('#review-consent'), false);
@@ -150,12 +161,19 @@ async function run() {
             }
             await page.reload();
             await page.waitForFunction(() => window.app?.review);
-            assert.equal(await page.inputValue('#review-endpoint'), `${base}/api/review`);
+            if (provider === 'azure') {
+                assert.equal(await page.inputValue('#review-endpoint'), base, 'Azure endpoint never fills Gemini fields');
+                await page.evaluate(() => {
+                    app.review.elements.provider.value = 'azure';
+                    app.review.changeProvider();
+                });
+            }
+            assert.equal(await page.inputValue('#review-endpoint'), `${base}${apiPath}`);
             assert.equal(await page.isChecked('#review-consent'), false);
             assert.equal(reviews, 2);
             assert.equal(checks, 1, 'restoring a connection does not silently contact it');
             assert.deepEqual(errors, []);
-            console.log(`${viewport.width}px: defaults, privacy, one-click pixels, region maps, crop, cap, undo and compare passed`);
+            console.log(`${provider} ${viewport.width}px: defaults, privacy, one-click pixels, region maps, crop, cap, undo and compare passed`);
             await context.close();
         }
     } finally {

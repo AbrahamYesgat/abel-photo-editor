@@ -184,6 +184,7 @@
                 <label class="review-field-label" for="review-provider">Review with</label>
                 <select id="review-provider">
                     <option value="gemini">Gemini - Google Cloud</option>
+                    <option value="azure">Azure OpenAI — Premium cloud</option>
                     <option value="local">Qwen - This computer</option>
                     <option value="manual">ChatGPT — Manual import</option>
                 </select>
@@ -191,18 +192,18 @@
                 <details id="review-connection" class="review-connection">
                     <summary id="review-connection-title">Connect Gemini backend</summary>
                     <div id="review-cloud-settings">
-                    <p class="review-note">The Gemini key belongs on your server, never here. GitHub Pages needs a connected backend: hosted, or your running local companion.</p>
+                    <p class="review-note">Cloud API keys belong on your server, never here. Gemini and Azure keep separate connections. GitHub Pages needs a connected backend: hosted, or your running local companion.</p>
                     <label for="review-endpoint">Backend URL (blank for this server)</label>
                     <input id="review-endpoint" type="url" placeholder="https://your-backend.example" autocomplete="off">
                     <div id="review-token-field">
-                        <label for="review-token">Backend access token (not a Gemini key; only if required)</label>
+                        <label for="review-token">Backend access token (not an API key; required for Azure)</label>
                         <input id="review-token" type="password" autocomplete="off" spellcheck="false" aria-describedby="review-gemini-storage-note">
                     </div>
-                    <label class="review-consent"><input id="review-remember-gemini" type="checkbox" aria-describedby="review-gemini-storage-note">Remember Gemini connection on this browser</label>
-                    <p id="review-gemini-storage-note" class="review-note">Opt in to save the verified backend URL and access token unencrypted in this site's browser storage. Scripts on this site can read it; avoid shared devices. Never enter a Gemini API key. Photo, intent and upload consent are never saved.</p>
+                    <label class="review-consent"><input id="review-remember-gemini" type="checkbox" aria-describedby="review-gemini-storage-note">Remember selected cloud connection on this browser</label>
+                    <p id="review-gemini-storage-note" class="review-note">Opt in to save the verified backend URL and access token unencrypted in this site's browser storage, separately for each cloud provider. Scripts on this site can read it; avoid shared devices. Never enter a cloud API key. Photo, intent and upload consent are never saved.</p>
                     <p id="review-gemini-storage-status" class="review-note" role="status">Defaults to this server. Saved connections fill automatically; no remote backend or secret can be discovered.</p>
                     <button id="review-check-gemini" class="btn btn-outline" type="button">Check Gemini connection</button>
-                    <button id="review-forget-gemini" class="btn btn-outline" type="button" hidden>Forget / change Gemini connection</button>
+                    <button id="review-forget-gemini" class="btn btn-outline" type="button" hidden>Forget / change selected cloud connection</button>
                     </div>
                     <div id="review-local-settings" hidden>
                         <p class="review-note">Run Ollama and the ABEL companion on this computer. The deployed website can connect here too; Qwen runs locally, not on the website's server.</p>
@@ -226,7 +227,7 @@
                 <button id="review-check-local" class="btn btn-outline" hidden>Check local connection</button>
                 <label class="review-field-label" for="review-intent">What are you going for?</label>
                 <textarea id="review-intent" rows="2" maxlength="600" placeholder="Natural colors, moody portrait, warm sunset..."></textarea>
-                <p id="review-intent-note" class="review-note">Gemini's editable default preserves the scene's existing mood; it is not a guess about your intent. Clear it or describe your own goal.</p>
+                <p id="review-intent-note" class="review-note">The editable cloud-review default preserves the scene's existing mood; it is not a guess about your intent. Clear it or describe your own goal.</p>
                 <div id="review-gemini-options">
                     <label class="review-field-label" for="review-gemini-mode">One-click action</label>
                     <select id="review-gemini-mode">

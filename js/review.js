@@ -11,6 +11,8 @@ class ReviewPanel {
         this.beforeContext = null;
         this.selection = '';
         this.elements = {};
+        this.cloudProvider = 'gemini';
+        this.cloudConnections = {};
         for (const name of ['endpoint', 'token', 'intent', 'consent', 'analyze', 'cancel',
             'status', 'result', 'feedback', 'adjustments', 'apply-bar', 'strength',
             'strength-value', 'apply', 'undo', 'compare', 'connection',
@@ -55,11 +57,16 @@ class ReviewPanel {
             }
         });
         window.addEventListener('storage', event => {
+            for (const provider of ['gemini', 'azure']) {
+                if (event.key === null || event.key === `abel.${provider}-connection.v1`) {
+                    delete this.cloudConnections[provider];
+                }
+            }
             if (event.key === null || event.key === this.geminiStorageKey()) {
                 this.savedGeminiConnection = null;
                 el.token.value = '';
                 if (!this.isLocal() && !this.isManual()) {
-                    this.invalidate('Saved Gemini connection changed in another tab. Reload or check the connection again.');
+                    this.invalidate('Saved cloud connection changed in another tab. Reload or check the connection again.');
                     el.consent.checked = false;
                 }
                 this.geminiStorageStatus('Saved connection changed in another tab. Reload to use it, or Forget to clear it.');
@@ -131,7 +138,9 @@ class ReviewPanel {
         return 'Preserve the scene’s existing mood and intentional styling. Make only clearly justified lighting and color refinements.';
     }
 
-    geminiStorageKey() { return 'abel.gemini-connection.v1'; }
+    geminiStorageKey() { return `abel.${this.cloudProvider || 'gemini'}-connection.v1`; }
+
+    cloudName() { return this.isAzure() ? 'Azure OpenAI' : 'Gemini'; }
 
     geminiStorageStatus(message, error = false) {
         this.elements['gemini-storage-status'].textContent = message;
@@ -157,11 +166,11 @@ class ReviewPanel {
                 this.elements.endpoint.value = endpoint;
                 this.elements.token.value = '';
                 this.elements['remember-gemini'].checked = true;
-                this.geminiStorageStatus('Saved Gemini connection filled. Consent and a click are still required; no photo has been sent.');
+                this.geminiStorageStatus(`Saved ${this.cloudName()} connection filled. Consent and a click are still required; no photo has been sent.`);
             }
         } catch {
             this.geminiStorageIssue = true;
-            this.geminiStorageStatus('Saved Gemini connection is invalid or storage is unavailable. Enter the connection again, or Forget to clear it.', true);
+            this.geminiStorageStatus('Saved cloud connection is invalid or storage is unavailable. Enter the connection again, or Forget to clear it.', true);
         }
         this.renderGeminiConnection();
     }
@@ -169,7 +178,7 @@ class ReviewPanel {
     geminiAccessToken() {
         if (this.savedGeminiConnection) {
             if (this.endpoint() !== this.savedGeminiConnection.endpoint) {
-                throw new Error('The saved token belongs to a different Gemini backend. Forget / change Gemini connection first.');
+                throw new Error(`The saved token belongs to a different ${this.cloudName()} backend. Forget / change connection first.`);
             }
             return this.savedGeminiConnection.token;
         }
@@ -186,7 +195,7 @@ class ReviewPanel {
             this.savedGeminiConnection = saved;
             this.elements.token.value = '';
             this.geminiStorageIssue = false;
-            this.geminiStorageStatus('Gemini connection saved on this browser. Forget removes its saved access token.');
+            this.geminiStorageStatus(`${this.cloudName()} connection saved on this browser. Forget removes its saved access token.`);
         } catch {
             this.geminiStorageIssue = true;
             this.geminiStorageStatus('Connected in this tab, but browser storage could not save the connection.', true);
@@ -195,11 +204,11 @@ class ReviewPanel {
     }
 
     forgetGeminiConnection() {
-        this.invalidate('Gemini credentials cleared. Existing photo edits are unchanged.');
+        this.invalidate('Cloud credentials cleared. Existing photo edits are unchanged.');
         this.elements.consent.checked = false;
         this.savedGeminiConnection = null;
         this.elements.token.value = '';
-        this.elements['provider-badge'].textContent = this.isLocal() ? 'Local Qwen' : this.isManual() ? 'ChatGPT Manual' : 'Gemini Cloud';
+        this.elements['provider-badge'].textContent = this.isLocal() ? 'Local Qwen' : this.isManual() ? 'ChatGPT Manual' : `${this.cloudName()} Cloud`;
         try {
             window.localStorage.removeItem(this.geminiStorageKey());
             this.geminiStorageIssue = false;
@@ -218,7 +227,7 @@ class ReviewPanel {
         try {
             const endpoint = this.endpoint();
             const token = this.geminiAccessToken();
-            this.invalidate('Checking Gemini backend configuration. No photo is sent.');
+            this.invalidate(`Checking ${this.cloudName()} backend configuration. No photo is sent.`);
             controller = new AbortController();
             this.controller = controller;
             this.checkingConnection = true;
@@ -229,28 +238,31 @@ class ReviewPanel {
                 credentials: 'omit', redirect: 'error',
             });
             if (!response.headers.get('content-type')?.includes('application/json')) {
-                throw new Error('No Gemini backend here. GitHub Pages needs your actual HTTPS backend URL, or an explicitly configured desktop companion; it cannot be discovered automatically.');
+                throw new Error('No cloud backend here. GitHub Pages needs your actual HTTPS backend URL, or an explicitly configured desktop companion; it cannot be discovered automatically.');
             }
             const data = await response.json();
             if (this.controller !== controller) return;
             if (this.isLocal() || this.isManual() || this.endpoint() !== endpoint || this.geminiAccessToken() !== token) {
-                this.invalidate('Gemini connection changed during the check. Check it again before saving.');
+                this.invalidate('Cloud connection changed during the check. Check it again before saving.');
                 return;
             }
-            if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gemini connection failed.');
+            if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Cloud connection failed.');
             if (typeof data.configured !== 'boolean' || typeof data.model !== 'string' ||
-                !/^gemini-[a-z0-9.-]{1,80}$/.test(data.model) || typeof data.authorized !== 'boolean') {
-                throw new Error('This address did not identify an updated ABEL Gemini backend.');
+                (this.isAzure() ? data.provider !== 'azure' || (data.configured && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}$/.test(data.model))
+                    : !/^gemini-[a-z0-9.-]{1,80}$/.test(data.model)) || typeof data.authorized !== 'boolean') {
+                throw new Error('This address did not identify the selected ABEL cloud provider.');
             }
             this.elements['provider-badge'].textContent = data.model;
-            if (!data.configured) throw new Error('Set GEMINI_API_KEY on this backend and restart it. The API key is never filled into the browser.');
-            if (!data.authorized) throw new Error('This backend requires a valid REVIEW_ACCESS_TOKEN. Enter that token, not a local Qwen token or Gemini API key; cross-origin use requires server configuration.');
+            if (!data.configured) throw new Error(this.isAzure()
+                ? 'Azure is not provisioned/configured on this backend. Configure its resource, deployment, model and server key; never enter an Azure API key here.'
+                : 'Set GEMINI_API_KEY on this backend and restart it. The API key is never filled into the browser.');
+            if (!data.authorized) throw new Error('This backend requires a valid REVIEW_ACCESS_TOKEN. Enter that token, not a local Qwen token or cloud API key; cross-origin use requires server configuration.');
             this.rememberGeminiConnection(endpoint);
-            this.setStatus(`${data.model} is configured on this backend. No photo or Google request was sent. This check cannot verify Gemini quota or generation access.`);
+            this.setStatus(`${data.model} is configured on this backend. No photo or provider request was sent. This check cannot verify model quota or generation access.`);
         } catch (error) {
             if (controller && this.controller !== controller) return;
-            this.setStatus(error.name === 'AbortError' ? 'Gemini connection check timed out.' :
-                error instanceof TypeError ? 'Cannot reach the Gemini backend. Check its URL, allowed origin and browser local-network permission.' : error.message, true);
+            this.setStatus(error.name === 'AbortError' ? 'Cloud connection check timed out.' :
+                error instanceof TypeError ? 'Cannot reach the cloud backend. Check its URL, allowed origin and browser local-network permission.' : error.message, true);
             this.elements.connection.open = true;
         } finally {
             clearTimeout(timeout);
@@ -364,6 +376,8 @@ class ReviewPanel {
         return this.elements.provider.value === 'local';
     }
 
+    isAzure() { return this.elements.provider.value === 'azure'; }
+
     localDefault() {
         const origin = new URL(window.location.href || window.location.origin);
         return ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
@@ -372,6 +386,25 @@ class ReviewPanel {
 
     changeProvider() {
         this.app._stopComparison();
+        const provider = this.elements.provider.value;
+        if (['gemini', 'azure'].includes(provider) && provider !== (this.cloudProvider || 'gemini')) {
+            this.cloudConnections ||= {};
+            this.cloudConnections[this.cloudProvider || 'gemini'] = {
+                endpoint: this.elements.endpoint.value, token: this.elements.token.value,
+                saved: this.savedGeminiConnection, remember: this.elements['remember-gemini'].checked,
+                issue: this.geminiStorageIssue
+            };
+            this.cloudProvider = provider;
+            const connection = this.cloudConnections[provider];
+            this.elements.endpoint.value = connection?.endpoint || window.location.origin;
+            this.elements.token.value = connection?.token || '';
+            this.elements['remember-gemini'].checked = connection?.remember || false;
+            this.savedGeminiConnection = connection?.saved || null;
+            this.geminiStorageIssue = connection?.issue || false;
+            this.geminiStorageStatus('Separate cloud connection. Check it before sending a photo.');
+            if (!connection) this.restoreGeminiConnection();
+            this.renderGeminiConnection();
+        }
         if (this.elements.intent.value === this.defaultIntent() && (this.isLocal() || this.isManual())) {
             this.elements.intent.value = '';
             this.defaultIntentRemoved = true;
@@ -383,17 +416,19 @@ class ReviewPanel {
             ? 'Export this edit first. Upload the downloaded preview and prompt yourself in ChatGPT, then paste its JSON here.'
             : this.isLocal()
             ? 'Local Qwen selected. Check the companion connection, then consent to local processing.'
-            : 'Gemini selected. Consent to uploading a preview before requesting a cloud review.');
+            : `${this.cloudName()} selected. Consent to uploading a preview before requesting a cloud review.`);
         const local = this.isLocal();
         const manual = this.isManual();
         const el = this.elements;
-        el['provider-badge'].textContent = manual ? 'ChatGPT Manual' : local ? 'Local Qwen' : 'Gemini Cloud';
+        el['provider-badge'].textContent = manual ? 'ChatGPT Manual' : local ? 'Local Qwen' : `${this.cloudName()} Cloud`;
         el['provider-note'].textContent = manual
             ? 'No automatic upload, API, backend, or ABEL login. You choose what to share in ChatGPT; its privacy settings and subscription limits apply.'
             : local
             ? 'Runs on this computer. No Google upload or API quota; CPU reviews may take several minutes. Never falls back to cloud.'
+            : this.isAzure() ? 'Premium image critique through your Azure OpenAI deployment. Uses Azure token quota and the server’s monthly review allowance; never falls back to another provider.'
             : 'Cloud reviews send a preview to Google and use your project\'s API quota.';
-        el['connection-title'].textContent = local ? 'Connect local companion' : 'Connect Gemini backend';
+        el['connection-title'].textContent = local ? 'Connect local companion' : `Connect ${this.cloudName()} backend`;
+        el['check-gemini'].textContent = `Check ${this.cloudName()} connection`;
         el.connection.hidden = manual;
         el['consent-label'].hidden = manual;
         el.analyze.hidden = manual;
@@ -402,8 +437,12 @@ class ReviewPanel {
         el['local-settings'].hidden = !local;
         el['check-local'].hidden = !local;
         el['data-terms'].hidden = local;
+        el['data-terms'].href = this.isAzure()
+            ? 'https://learn.microsoft.com/en-us/azure/ai-foundry/responsible-ai/openai/data-privacy'
+            : 'https://ai.google.dev/gemini-api/terms';
         el['consent-text'].textContent = local
             ? 'Process a reduced photo preview and my editing intent with local Qwen on this computer. Nothing is sent to Google.'
+            : this.isAzure() ? 'Send a reduced photo preview and my editing intent to the connected server and Microsoft Azure OpenAI. Azure processing, retention and abuse-monitoring terms apply.'
             : 'Send a reduced photo preview and my editing intent to the connected server and Google. Free-tier content may be used to improve Google\'s products.';
         el.connection.open = local;
         this.updateButtons();
@@ -670,8 +709,8 @@ class ReviewPanel {
     }
 
     endpoint() {
-        if (!['gemini', 'local'].includes(this.elements.provider.value)) {
-            throw new Error('Choose Gemini or Local Qwen before reviewing.');
+        if (!['gemini', 'azure', 'local'].includes(this.elements.provider.value)) {
+            throw new Error('Choose Azure OpenAI, Gemini or Local Qwen before reviewing.');
         }
         const localProvider = this.isLocal();
         if (localProvider) return this.localEndpoint(this.elements['local-endpoint'].value);
@@ -705,7 +744,12 @@ class ReviewPanel {
             url.pathname = '/api/review/local';
             return url.href;
         }
-        url.pathname = path.endsWith('/api/review') ? path : `${path}/api/review`;
+        const suffix = this.cloudProvider === 'azure' ? '/api/review/azure' : '/api/review';
+        if ((path.endsWith('/api/review/azure') && suffix !== '/api/review/azure') ||
+            (path.endsWith('/api/review') && suffix !== '/api/review')) {
+            throw new Error('This URL belongs to a different cloud provider. Use the backend base URL.');
+        }
+        url.pathname = path.endsWith(suffix) ? path : `${path}${suffix}`;
         return url.href;
     }
 
@@ -757,9 +801,9 @@ class ReviewPanel {
             this.updateButtons();
             this.setStatus(localProvider
                 ? 'Qwen is reviewing locally. First use loads the model; CPU processing can take several minutes. Cancel anytime. Nothing is sent to Google.'
-                : action ? `Gemini is reviewing your photo, then applying only ${action === 'adaptive' ? 'Adaptive' : 'Global'}. Cancel to stop.`
-                : 'Gemini is reviewing your photo. You can cancel; no changes are applied automatically.');
-            timeout = setTimeout(() => { timedOut = true; controller.abort(); }, localProvider ? 910000 : 75000);
+                : action ? `${this.cloudName()} is reviewing your photo, then applying only ${action === 'adaptive' ? 'Adaptive' : 'Global'}. Cancel to stop.`
+                : `${this.cloudName()} is reviewing your photo. You can cancel; no changes are applied automatically.`);
+            timeout = setTimeout(() => { timedOut = true; controller.abort(); }, localProvider ? 910000 : this.isAzure() ? 135000 : 75000);
             const headers = this.requestHeaders();
             const response = await fetch(endpoint, {
                 method: 'POST', headers, body: JSON.stringify(request),
@@ -768,7 +812,7 @@ class ReviewPanel {
             if (!response.headers.get('content-type')?.includes('application/json')) {
                 throw new Error(localProvider
                     ? 'No local review companion found. Start the updated ABEL companion on this computer.'
-                    : 'No review backend found. GitHub Pages cannot run Gemini; connect your backend URL above.');
+                    : 'No review backend found. GitHub Pages cannot run cloud inference; connect your backend URL above.');
             }
             const data = await response.json();
             connectionIssue = ['unauthorized', 'origin_denied', 'review_token_required', 'local_token_required', 'local_unauthorized'].includes(data.code);

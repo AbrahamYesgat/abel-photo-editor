@@ -1,6 +1,42 @@
 # ABEL Photo Editor
 
-A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent. Gemini forwards these to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
+A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Azure OpenAI**, **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent. Azure forwards these to your Microsoft Azure OpenAI deployment; Gemini forwards them to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
+
+## Azure OpenAI premium review
+
+Select **Azure OpenAI — Premium cloud** in Review. This uses the same intent-first photographic critique and detailed image/region audit as Gemini, with independent Global and Adaptive recipes, adjustable strength, review-only or one-click application, full validation, one-step undo and comparison. The model proposes permitted lighting/color settings and approximate soft geometry; it does **not** generate replacement pixels or perform subject segmentation.
+
+**Integration is implemented; provisioning is not automatic.** An Azure portal login does not grant this process Azure CLI access. Authenticate the CLI yourself (`az login --use-device-code`), then verify the current subscription/offer, remaining credit, region/model quota and actual token meter **before** creating resources. No resource, deployment, region, live model capability or credit eligibility is implied by the UI or the example configuration. A connection check only reads server configuration and authentication status; it makes no Azure request.
+
+For a premium deployment, choose an actually available, generally available model with **image input, Chat Completions and strict structured outputs**. Microsoft’s [current model catalog](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure) documents GPT-5.4/5.5 and newer families, but published catalog presence is not subscription quota. Newest models may require higher quota tiers or approval. Confirm the deployment against [Azure pricing](https://azure.microsoft.com/en-us/pricing/details/azure-openai/), not OpenAI's separate API prices or a guessed rate. The public pricing page can show `$-` without a resolved region/offer; that is **not free**. No universal “best” model or verified dollar rate is hardcoded.
+
+Use only **Standard or GlobalStandard pay-per-token** capacity with low TPM, never PTU/provisioned capacity, dedicated GPUs or auto-upgrades. Verify whether your [$150 Visual Studio benefit](https://azure.microsoft.com/en-us/pricing/member-offers/credit-for-visual-studio-subscribers/) is the active offer: such credits have service exclusions and development/test restrictions. Do not remove the subscription spending limit, attach payment, or assume production eligibility.
+
+Configure all four `AZURE_OPENAI_*` settings in the private server `.env` (see `.env.example`): resource endpoint, exact deployment name, actual model name and resource API key. The stable `/openai/v1/chat/completions` API is fixed in the server; no arbitrary client upstream URLs or preview API version are used. The endpoint must be an HTTPS `*.openai.azure.com` resource origin without credentials, paths, queries or redirects. Keys never enter public JavaScript, responses or browser storage. Keep `.env` owner-readable only (`chmod 600 .env`).
+
+Set a strong random `REVIEW_ACCESS_TOKEN` even for localhost Azure use. The browser receives only the backend URL and this separate access token, **not** the Azure resource key. Cloud connection preferences are stored separately as `abel.azure-connection.v1` and `abel.gemini-connection.v1`; switching providers never copies credentials. Remember is opt-in and unencrypted browser storage is readable by site scripts. Changing connections, forgetting in another tab, cancelling, switching providers or withdrawing consent invalidates pending results.
+
+### Budget and hosting safeguards
+
+- Azure defaults to **100 dispatched attempts per UTC calendar month** and **8,192 maximum completion tokens including reasoning** (configurable ceiling 12,000). GPT-5 models request low reasoning; unsupported temperature/max_tokens parameters are not sent. A fixed system prompt, 600-character intent, 34 allowed current controls and a single EXIF-stripped JPEG capped at 1280 × 1280 bound the input. The Azure timeout is 120 seconds.
+- The existing authenticated backend has process-wide rate/concurrency controls shared by both cloud providers. For a personal credit deployment, set `REVIEW_RATE_LIMIT=3`, `REVIEW_RATE_WINDOW_MS=60000` and `REVIEW_CONCURRENCY=1`. Spoofed forwarding/IP headers do not bypass these controls. For multiple users, put real per-user authentication and shared rate enforcement in front of the server; do not publish a shared access token.
+- The private `.azure-budget` ledger reserves an attempt **before** dispatch and retains it after failures, cancellation or restart. It uses an exclusive cross-process lock and atomic file replacement; unavailable/corrupt storage or an occupied lock rejects the request. A crash can leave a stale `lock` directory: stop every instance and inspect/reconcile the monthly ledger before removing **only the stale lock**. Never delete/reset the ledger to bypass the allowance.
+- All instances must share the **same persistent private budget directory**. Do not deploy this file-backed guard on ephemeral Functions/Container Apps storage or separately scaled replicas. A suitable single-instance persistent CPU host or transactional shared budget store is required before cloud hosting. No GPU, monitoring service, hosting resource or public unsecured endpoint is created by this code.
+- This is a hard **application attempt limit**, **not a $150 Azure account-wide spending cap**. Calculate the allowance from the actual model's input/output/image/reasoning rates, leave room for hosting and other services, and retain Azure's credit spending limit. Alerts alone do not stop charges. Other applications or direct API calls can bypass ABEL's allowance.
+
+`GET /api/review/azure/status` returns only `provider`, configured model, key-configured flag, authorization status, token requirement and monthly request allowance. `POST /api/review/azure` requires the backend token, exact allowed origin, bounded JSON and a valid preview. Refusals, truncation, tool calls, duplicate JSON keys, unsupported edits and out-of-range masks are rejected without applying changes or contacting another provider.
+
+For Pages, connect the **actual HTTPS backend base URL** and allow exactly `https://abrahamyesgat.github.io` (no `/lumiedit` path) in `ALLOWED_ORIGINS`. Pages itself cannot host this Node backend. A desktop companion can also be connected explicitly; phones cannot reach your Mac through `localhost`. Upload consent explicitly identifies Microsoft Azure and links its processing/retention terms.
+
+Validation requires no Azure key or paid calls:
+
+```sh
+node --test test/review-azure.test.js test/review-ui.test.js test/review-server.test.js test/review-prompt.test.js
+# With an existing Playwright/Chromium installation:
+REVIEW_PROVIDER=azure PLAYWRIGHT_MODULE=/path/to/playwright node scripts/check-gemini-review.cjs
+```
+
+The browser check uses only synthetic canvas pixels and intercepted responses on desktop/mobile, including consent, isolated restoration, adaptive pixel placement, crop coordinates, mask caps, undo and comparison. Before marking a real deployment ready, run one small synthetic JPEG + strict-schema request against the selected deployment and verify its usage/meter; mocked tests do not prove Azure access.
 
 ## ChatGPT manual review (no backend or API)
 

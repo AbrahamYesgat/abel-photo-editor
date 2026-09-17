@@ -135,6 +135,146 @@ function geminiHarness(options) {
     return fixture;
 }
 
+function azureHarness(options) {
+    const fixture = geminiHarness(options);
+    fixture.review.elements.provider.value = 'azure';
+    fixture.review.changeProvider();
+    fixture.review.elements.consent.checked = true;
+    fixture.review.elements.token.value = 'azure-test-token';
+    return fixture;
+}
+
+test('Azure separates cloud credentials, defaults and terms without granting consent or probing', async () => {
+    const { review, context, storage } = harness({ initialize: true });
+    review.elements.endpoint.value = 'https://gemini.example';
+    review.elements.token.value = 'gemini-test-token';
+    review.elements['remember-gemini'].checked = true;
+    review.rememberGeminiConnection(review.endpoint());
+    review.elements.provider.value = 'azure';
+    review.changeProvider();
+    assert.equal(review.elements.consent.checked, false);
+    assert.equal(review.elements.token.value, '');
+    assert.equal(review.savedGeminiConnection, null);
+    assert.equal(review.endpoint(), 'http://localhost:3000/api/review/azure');
+    assert.equal(review.elements['remember-gemini'].checked, false);
+    assert.match(review.elements['consent-text'].textContent, /Microsoft Azure OpenAI/);
+    assert.match(review.elements['data-terms'].href, /microsoft.com/);
+    assert.equal(review.elements['gemini-mode'].value, 'global');
+    review.elements.endpoint.value = 'https://azure-backend.example';
+    review.elements.token.value = 'azure-test-token';
+    review.elements['remember-gemini'].checked = true;
+    context.fetch = async (url, options) => {
+        assert.equal(url, 'https://azure-backend.example/api/review/azure/status');
+        assert.equal(options.headers.Authorization, 'Bearer azure-test-token');
+        assert.equal(options.body, undefined);
+        return Response.json({ configured: true, provider: 'azure', model: 'gpt-5.4', authorized: true, tokenRequired: true });
+    };
+    await review.checkGeminiConnection();
+    assert.equal(review.elements.token.value, '');
+    assert.equal(JSON.parse(storage.getItem('abel.azure-connection.v1')).token, 'azure-test-token');
+    assert.equal(JSON.parse(storage.getItem('abel.gemini-connection.v1')).token, 'gemini-test-token');
+    review.elements.provider.value = 'gemini';
+    review.changeProvider();
+    assert.equal(review.requestHeaders().Authorization, 'Bearer gemini-test-token');
+    assert.equal(review.endpoint(), 'https://gemini.example/api/review');
+    review.elements.provider.value = 'azure';
+    review.changeProvider();
+    assert.equal(review.requestHeaders().Authorization, 'Bearer azure-test-token');
+    assert.equal(review.endpoint(), 'https://azure-backend.example/api/review/azure');
+    review.forgetGeminiConnection();
+    assert.equal(storage.getItem('abel.azure-connection.v1'), null);
+    assert.ok(storage.getItem('abel.gemini-connection.v1'));
+});
+
+test('Azure restoration is isolated and forgetting inactive credentials in another tab clears the cache', () => {
+    const storage = memoryStorage();
+    for (const provider of ['azure', 'gemini']) storage.setItem(`abel.${provider}-connection.v1`, JSON.stringify({
+        version: 1, endpoint: `https://${provider}.example/api/review${provider === 'azure' ? '/azure' : ''}`,
+        token: `${provider}-test-token`
+    }));
+    const { review, context } = harness({ initialize: true, storage });
+    review.elements.provider.value = 'azure';
+    review.changeProvider();
+    assert.equal(review.requestHeaders().Authorization, 'Bearer azure-test-token');
+    assert.equal(review.elements.consent.checked, false);
+    storage.removeItem('abel.gemini-connection.v1');
+    context.window.listeners.storage({ key: 'abel.gemini-connection.v1', newValue: null });
+    assert.equal(review.requestHeaders().Authorization, 'Bearer azure-test-token');
+    review.elements.provider.value = 'gemini';
+    review.changeProvider();
+    assert.equal(review.requestHeaders().Authorization, undefined);
+    review.elements.provider.value = 'azure';
+    review.changeProvider();
+    context.window.listeners.storage({ key: 'abel.azure-connection.v1', newValue: null });
+    assert.equal(review.requestHeaders().Authorization, undefined);
+});
+
+test('Azure review-only, Global and Adaptive retain one-click bounds, undo, compare and consent', async () => {
+    for (const mode of ['review', 'global', 'adaptive']) {
+        const { app, review, context } = azureHarness();
+        review.elements['gemini-mode'].value = mode;
+        review.elements['gemini-strength'].value = '50';
+        const baseline = review.snapshot().edits;
+        const result = response([{ key: 'exposure', value: 0.8, reason: 'Lift.' }]);
+        result.adaptive = { adjustments: [{ key: 'temperature', value: 8, reason: 'Warm.' }], regions: [adaptiveRegion()] };
+        let calls = 0;
+        context.fetch = async (url, options) => {
+            calls++;
+            assert.equal(url, 'http://localhost:3000/api/review/azure');
+            assert.equal(options.headers.Authorization, 'Bearer azure-test-token');
+            return Response.json(result);
+        };
+        review.elements.consent.checked = false;
+        await review.analyze();
+        assert.equal(calls, 0);
+        review.elements.consent.checked = true;
+        await review.analyze();
+        assert.equal(calls, 1);
+        assert.equal(app.state.exposure, mode === 'global' ? 0.4 : 0);
+        assert.equal(app.state.temperature, mode === 'adaptive' ? 4 : 0);
+        assert.equal(app.maskEngine.masks.length, mode === 'adaptive' ? 1 : 0);
+        assert.equal(review.canCompare(), mode !== 'review');
+        if (mode !== 'review') {
+            app._undo();
+            assert.equal(review.snapshot().edits, baseline);
+            app._redo();
+            assert.equal(review.canCompare(), true);
+        } else assert.equal(review.snapshot().edits, baseline);
+    }
+});
+
+test('Azure cancelled, stale, revoked and switched responses never apply or fall back', async () => {
+    for (const mutate of [
+        r => r.elements.cancel.dispatch('click'),
+        r => { r.elements.consent.checked = false; },
+        (r, a) => { a.state.exposure = 0.2; },
+        r => { r.elements.provider.value = 'gemini'; r.changeProvider(); },
+        r => { r.elements.provider.value = 'local'; r.changeProvider(); },
+        r => { r.elements['gemini-strength'].value = '25'; }
+    ]) {
+        const { app, review, context } = azureHarness();
+        let finish, calls = 0;
+        context.fetch = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+        const pending = review.analyze();
+        mutate(review, app);
+        const baseline = review.snapshot().edits;
+        finish(Response.json(response([{ key: 'exposure', value: 0.6, reason: 'Lift.' }])));
+        await pending;
+        assert.equal(calls, 1);
+        assert.equal(review.snapshot().edits, baseline);
+        assert.equal(review.result, null);
+        assert.equal(review.canCompare(), false);
+    }
+    const { review, context } = azureHarness();
+    const baseline = review.snapshot().edits;
+    let calls = 0;
+    context.fetch = async () => { calls++; return Response.json({ error: 'Monthly allowance exhausted', code: 'azure_monthly_limit' }, { status: 429 }); };
+    await review.analyze();
+    assert.equal(calls, 1);
+    assert.equal(review.snapshot().edits, baseline);
+    assert.match(review.elements.status.textContent, /Monthly allowance exhausted/);
+});
+
 test('Gemini defaults fill safely without network, invented backend, saved intent or upload consent', () => {
     const { review, storage } = harness({ initialize: true });
     assert.equal(review.elements.endpoint.value, 'http://localhost:3000');
