@@ -378,6 +378,11 @@ class ReviewPanel {
 
     isAzure() { return this.elements.provider.value === 'azure'; }
 
+    cloudDefault(provider) {
+        return (provider === 'azure' && document.querySelector('meta[name="abel-azure-review-endpoint"]')?.content)
+            || window.location.origin;
+    }
+
     localDefault() {
         const origin = new URL(window.location.href || window.location.origin);
         return ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)
@@ -396,7 +401,7 @@ class ReviewPanel {
             };
             this.cloudProvider = provider;
             const connection = this.cloudConnections[provider];
-            this.elements.endpoint.value = connection?.endpoint || window.location.origin;
+            this.elements.endpoint.value = connection?.endpoint || this.cloudDefault(provider);
             this.elements.token.value = connection?.token || '';
             this.elements['remember-gemini'].checked = connection?.remember || false;
             this.savedGeminiConnection = connection?.saved || null;

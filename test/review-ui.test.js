@@ -45,6 +45,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
             return elements.get(id);
         },
         querySelectorAll() { return []; },
+        querySelector() { return null; },
     };
     const context = vm.createContext({
         document, window: {
@@ -143,6 +144,21 @@ function azureHarness(options) {
     fixture.review.elements.token.value = 'azure-test-token';
     return fixture;
 }
+
+test('Azure public endpoint default contains no token and never grants consent or probes', () => {
+    const { review, context, document } = harness({ initialize: true });
+    document.querySelector = selector => selector === 'meta[name="abel-azure-review-endpoint"]'
+        ? { content: 'https://azure-backend.example' } : null;
+    context.fetch = () => { throw new Error('Provider selection must not make requests'); };
+    review.elements.provider.value = 'azure';
+    review.changeProvider();
+    assert.equal(review.endpoint(), 'https://azure-backend.example/api/review/azure');
+    assert.equal(review.elements.token.value, '');
+    assert.equal(review.elements.consent.checked, false);
+    review.elements.provider.value = 'gemini';
+    review.changeProvider();
+    assert.equal(review.endpoint(), 'http://localhost:3000/api/review');
+});
 
 test('Azure separates cloud credentials, defaults and terms without granting consent or probing', async () => {
     const { review, context, storage } = harness({ initialize: true });

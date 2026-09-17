@@ -6,7 +6,47 @@ A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional 
 
 Select **Azure OpenAI — Premium cloud** in Review. This uses the same intent-first photographic critique and detailed image/region audit as Gemini, with independent Global and Adaptive recipes, adjustable strength, review-only or one-click application, full validation, one-step undo and comparison. The model proposes permitted lighting/color settings and approximate soft geometry; it does **not** generate replacement pixels or perform subject segmentation.
 
-**Integration is implemented; provisioning is not automatic.** An Azure portal login does not grant this process Azure CLI access. Authenticate the CLI yourself (`az login --use-device-code`), then verify the current subscription/offer, remaining credit, region/model quota and actual token meter **before** creating resources. No resource, deployment, region, live model capability or credit eligibility is implied by the UI or the example configuration. A connection check only reads server configuration and authentication status; it makes no Azure request.
+**Provisioned and verified September 17, 2026:** Azure uses the HTTPS backend at **https://abel-review-66c1d915.azurewebsites.net**, independently of your Mac. Select Azure, open its connection settings, paste the separate backend access token, and check the connection. Optionally enable Remember on a trusted browser; explicitly consent before requesting a review. The public default is configurable through the `abel-azure-review-endpoint` meta tag in `index.html`; it never contains a credential. A connection check reads configuration/authentication status only and makes no model request.
+
+Resources are isolated in `abel-photo-review`:
+
+| Resource | Configuration |
+| --- | --- |
+| `abel-photo-review-66c1d915` | Azure OpenAI S0, East US 2; `https://abel-photo-review-66c1d915.openai.azure.com/` |
+| `abel-premium-gpt55` | GPT-5.5 `2026-04-24`, GlobalStandard, capacity 20 (20,000 TPM), no automatic version upgrade |
+| `abel-review-66c1d915` | Linux Node 22 App Service, East US, HTTPS only, Azure-only credentials |
+| `abel-review-free-windows` | **Linux F1 Free**, despite its historical name; one worker, no Always On |
+
+GPT-5.5 was selected as a practical premium general vision/reasoning model after querying this subscription's actual GA catalog and unused quota, not as a measured universal “best.” Its image input, low reasoning and strict Chat Completions schema were verified with **one synthetic 640 × 400 JPEG**: HTTP 200, full contract validation, two adaptive regions, about 15 seconds. Azure metrics reported 6,010 prompt and 1,097 generated tokens. [Azure's retail meter API](https://prices.azure.com/api/retail/prices) reported East US 2 **5.5 ShortCo inp Gl** at **$5/M input**, **5.5 ShortCo opt Gl** at **$30/M output**, and cached input at **$0.50/M** (USD). That synthetic call is approximately **$0.063** at uncached retail rates, not an invoice or a typical-photo guarantee.
+
+The active subscription reports `quotaId=MSDN_2014-09-01` and `spendingLimit=On`. This confirms an MSDN/Visual Studio offer, **not the exact $150 entitlement, remaining credit or every service's eligibility**. Visual Studio benefits are development/test only; do not use this as a production-service entitlement. Existing unrelated Azure resources also consume the subscription allowance. No payment method, offer upgrade or spending-limit removal was performed.
+
+The model has no PTU/GPU reservation; this app's host is F1 Free, with cold starts, shared CPU/daily quotas and no uptime SLA. The ledger lives at persistent `/home/abel-azure-budget`, outside deployed files; restart persistence was checked. The hosted server limits requests to two/minute, one concurrent review and 100 dispatched attempts/UTC month. Its 8,192-token output ceiling implies at most **$24.58 output tokens per 100 attempts**, **plus input tokens and any other charges** at the verified rates. This is not a dollar or subscription-wide cap. Local direct Azure credentials are disabled in this installation to avoid a second independent allowance; the local editor selects the same hosted Azure default. Gemini, local Qwen and manual review remain separate.
+
+### Reproducing or updating this deployment
+
+`infra/azure.json` is the resource-group ARM template, including the pinned model, free Linux plan, HTTPS/TLS, disabled FTP/SCM basic authentication, Azure-only settings, server-side resource key lookup and persistent allowance. It never outputs credentials. It is not a code deployment and does not authenticate you or change your offer. Before using it elsewhere, authenticate Azure CLI, inspect the subscription/credit/model quota, and change globally unique names/regions as needed; do not upgrade to paid hosting if free-tier quota fails without reviewing costs.
+
+For this existing installation, `.env.azure-hosted` is a gitignored, mode-0600 JSON settings file containing the **private backend access token and Azure key**. Never print it, upload it as public content, or include it in an archive. To reapply infrastructure without putting a secret in command arguments:
+
+```sh
+mkdir -p .azure-tools
+node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync(".env.azure-hosted")); fs.writeFileSync(".azure-tools/deployment-parameters.json",JSON.stringify({reviewAccessToken:{value:c.REVIEW_ACCESS_TOKEN}}),{mode:0o600})'
+az deployment group create -g abel-photo-review -n abel-review-infrastructure --mode Incremental \
+  --template-file infra/azure.json --parameters @.azure-tools/deployment-parameters.json -o none
+rm .azure-tools/deployment-parameters.json
+git archive --format=zip --output=.azure-tools/abel-backend.zip HEAD package.json server js css index.html manifest.json
+az webapp deploy -g abel-photo-review -n abel-review-66c1d915 \
+  --src-path .azure-tools/abel-backend.zip --type zip --clean true --restart true -o none
+```
+
+Keep the same token when reapplying; rotate it deliberately if compromised and reconnect trusted browsers. On this Mac, copy only the backend token without printing it:
+
+```sh
+node -e 'const fs=require("fs"),cp=require("child_process");cp.execFileSync("pbcopy",{input:JSON.parse(fs.readFileSync(".env.azure-hosted")).REVIEW_ACCESS_TOKEN})'
+```
+
+Never delete `/home/abel-azure-budget` to reset usage, move it into `wwwroot`, run independently budgeted replicas/slots, or share the Azure resource key with browser clients. A stale guard lock fails closed and requires operator investigation, not automatic deletion. For a fresh deployment, generate a fresh random token and use the secure ARM parameter; the template retrieves the Azure resource key internally.
 
 For a premium deployment, choose an actually available, generally available model with **image input, Chat Completions and strict structured outputs**. Microsoft’s [current model catalog](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure) documents GPT-5.4/5.5 and newer families, but published catalog presence is not subscription quota. Newest models may require higher quota tiers or approval. Confirm the deployment against [Azure pricing](https://azure.microsoft.com/en-us/pricing/details/azure-openai/), not OpenAI's separate API prices or a guessed rate. The public pricing page can show `$-` without a resolved region/offer; that is **not free**. No universal “best” model or verified dollar rate is hardcoded.
 

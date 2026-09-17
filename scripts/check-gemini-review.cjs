@@ -73,6 +73,9 @@ async function run() {
             await page.locator(viewport.width < 500 ? '.mobile-tab[data-panel="review"]' : '.vtab[data-panel="review"]').click();
             if (provider === 'azure') {
                 await page.selectOption('#review-provider', 'azure');
+                assert.equal(await page.inputValue('#review-endpoint'), 'https://abel-review-66c1d915.azurewebsites.net');
+                await page.locator('#review-connection').evaluate(node => { node.open = true; });
+                await page.fill('#review-endpoint', base);
                 assert.equal(await page.isChecked('#review-consent'), false);
                 assert.equal(await page.inputValue('#review-token'), '');
                 assert.match(await page.textContent('#review-consent-text'), /Microsoft Azure/);

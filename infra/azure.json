@@ -1,0 +1,116 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "reviewAccessToken": { "type": "securestring", "minLength": 32 },
+    "openaiName": { "type": "string", "defaultValue": "abel-photo-review-66c1d915" },
+    "siteName": { "type": "string", "defaultValue": "abel-review-66c1d915" },
+    "planName": { "type": "string", "defaultValue": "abel-review-free-windows" },
+    "modelLocation": { "type": "string", "defaultValue": "eastus2" },
+    "hostLocation": { "type": "string", "defaultValue": "eastus" }
+  },
+  "variables": {
+    "deploymentName": "abel-premium-gpt55",
+    "tags": { "application": "abel-photo-editor", "purpose": "personal-dev-test" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2024-10-01",
+      "name": "[parameters('openaiName')]",
+      "location": "[parameters('modelLocation')]",
+      "kind": "OpenAI",
+      "sku": { "name": "S0" },
+      "tags": "[variables('tags')]",
+      "properties": {
+        "customSubDomainName": "[parameters('openaiName')]",
+        "publicNetworkAccess": "Enabled",
+        "networkAcls": { "defaultAction": "Allow" }
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2024-10-01",
+      "name": "[format('{0}/{1}', parameters('openaiName'), variables('deploymentName'))]",
+      "dependsOn": ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('openaiName'))]"],
+      "sku": { "name": "GlobalStandard", "capacity": 20 },
+      "properties": {
+        "model": { "format": "OpenAI", "name": "gpt-5.5", "version": "2026-04-24" },
+        "versionUpgradeOption": "NoAutoUpgrade"
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-04-01",
+      "name": "[parameters('planName')]",
+      "location": "[parameters('hostLocation')]",
+      "kind": "linux",
+      "tags": "[variables('tags')]",
+      "sku": { "name": "F1", "tier": "Free", "capacity": 1 },
+      "properties": { "reserved": true }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-04-01",
+      "name": "[parameters('siteName')]",
+      "location": "[parameters('hostLocation')]",
+      "kind": "app,linux",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+        "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('openaiName'), variables('deploymentName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "NODE|22-lts",
+          "appCommandLine": "node server/index.js",
+          "alwaysOn": false,
+          "ftpsState": "Disabled",
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "appSettings": [
+            { "name": "HOST", "value": "0.0.0.0" },
+            { "name": "PORT", "value": "8080" },
+            { "name": "REVIEW_ACCESS_TOKEN", "value": "[parameters('reviewAccessToken')]" },
+            { "name": "ALLOWED_ORIGINS", "value": "[format('https://abrahamyesgat.github.io,https://{0}.azurewebsites.net', parameters('siteName'))]" },
+            { "name": "GEMINI_API_KEY", "value": "" },
+            { "name": "LOCAL_REVIEW_ENABLED", "value": "false" },
+            { "name": "AZURE_OPENAI_ENDPOINT", "value": "[format('https://{0}.openai.azure.com/', parameters('openaiName'))]" },
+            { "name": "AZURE_OPENAI_DEPLOYMENT", "value": "[variables('deploymentName')]" },
+            { "name": "AZURE_OPENAI_MODEL", "value": "gpt-5.5" },
+            { "name": "AZURE_OPENAI_API_KEY", "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('openaiName')), '2024-10-01').key1]" },
+            { "name": "AZURE_REVIEW_MAX_COMPLETION_TOKENS", "value": "8192" },
+            { "name": "AZURE_REVIEW_TIMEOUT_MS", "value": "120000" },
+            { "name": "AZURE_REVIEW_MONTHLY_LIMIT", "value": "100" },
+            { "name": "AZURE_REVIEW_BUDGET_DIR", "value": "/home/abel-azure-budget" },
+            { "name": "REVIEW_RATE_LIMIT", "value": "2" },
+            { "name": "REVIEW_RATE_WINDOW_MS", "value": "60000" },
+            { "name": "REVIEW_CONCURRENCY", "value": "1" },
+            { "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE", "value": "true" },
+            { "name": "SCM_DO_BUILD_DURING_DEPLOYMENT", "value": "false" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2024-04-01",
+      "name": "[format('{0}/scm', parameters('siteName'))]",
+      "dependsOn": ["[resourceId('Microsoft.Web/sites', parameters('siteName'))]"],
+      "properties": { "allow": false }
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2024-04-01",
+      "name": "[format('{0}/ftp', parameters('siteName'))]",
+      "dependsOn": ["[resourceId('Microsoft.Web/sites', parameters('siteName'))]"],
+      "properties": { "allow": false }
+    }
+  ],
+  "outputs": {
+    "backendUrl": { "type": "string", "value": "[format('https://{0}.azurewebsites.net', parameters('siteName'))]" }
+  }
+}
