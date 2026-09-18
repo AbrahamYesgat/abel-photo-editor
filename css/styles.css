@@ -1683,3 +1683,45 @@ html, body {
     margin: 8px 0;
     border-radius: 4px;
 }
+.review-photo-controls {
+    position: absolute;
+    z-index: 12;
+    left: 50%;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    width: min(370px, calc(100% - 20px));
+    padding: 5px 7px;
+    border: 1px solid #555;
+    border-radius: 12px;
+    background: rgba(22, 22, 25, .94);
+    color: #eee;
+    box-shadow: 0 3px 16px #0006;
+    touch-action: manipulation;
+}
+.review-photo-controls[hidden] { display: none; }
+.canvas-container.mask-mode .review-photo-controls,
+.canvas-container:has(.crop-overlay.active) .review-photo-controls { display: none; }
+.review-intensities, .review-photo-options { display: flex; align-items: center; gap: 4px; }
+.review-photo-controls button, .review-photo-controls select {
+    min-height: 44px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+.review-intensities button { flex: 1; }
+.review-intensities button[aria-pressed="true"] { background: #494191; border-color: #aca3ff; }
+.review-photo-controls :focus-visible { outline: 2px solid #c6c0ff; outline-offset: 1px; }
+.review-photo-options input { min-width: 40px; width: 100%; height: 44px; accent-color: #a49aff; }
+.review-photo-options output { font-size: 11px; min-width: 30px; }
+.review-photo-controls select { background: #222; }
+.review-photo-state { display: block; text-align: center; font-size: 10px; line-height: 1.5; }
+.review-view-photo { display: none; }
+@media (max-width: 700px) {
+    .review-view-photo:not([hidden]) { display: block; width: 100%; }
+    .editor-layout:has(.sidebar-right.mobile-open) .review-photo-controls { display: none; }
+}

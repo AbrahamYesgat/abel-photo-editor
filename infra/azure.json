@@ -82,7 +82,7 @@
             { "name": "AZURE_OPENAI_DEPLOYMENT", "value": "[variables('deploymentName')]" },
             { "name": "AZURE_OPENAI_MODEL", "value": "gpt-5.5" },
             { "name": "AZURE_OPENAI_API_KEY", "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('openaiName')), '2024-10-01').key1]" },
-            { "name": "AZURE_REVIEW_MAX_COMPLETION_TOKENS", "value": "8192" },
+            { "name": "AZURE_REVIEW_MAX_COMPLETION_TOKENS", "value": "12000" },
             { "name": "AZURE_REVIEW_TIMEOUT_MS", "value": "120000" },
             { "name": "AZURE_REVIEW_MONTHLY_LIMIT", "value": "100" },
             { "name": "AZURE_REVIEW_BUDGET_DIR", "value": "/home/abel-azure-budget" },

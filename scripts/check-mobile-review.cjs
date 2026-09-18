@@ -86,12 +86,17 @@ const digest = text => createHash('sha256').update(text).digest('hex');
                         portfolioVerdict: { label: 'Borderline', reason: 'A little dark.' },
                         categories: ReviewContract.reviewCategories.map(name => ({ name, score: 7, feedback: 'Open the midtones gently. '.repeat(12) })),
                         strengths: ['Clear focal point.'], improvements: ['Lift the subject.'], cropFeedback: 'Keep framing.',
+                        variants: {
+                        refine: { adjustments: [], adaptive: { adjustments: [], regions: [] } },
+                        expressive: { adjustments: [], adaptive: { adjustments: [], regions: [] } },
+                        balanced: {
                         adjustments: [{ key: 'exposure', value: .8, reason: 'Lift.' }],
                         adaptive: { adjustments: [{ key: 'temperature', value: 18, reason: 'Warm.' }], regions: [{
                             name: 'Subject', reason: 'Soft lift.',
                             geometry: { type: 'radial', x: .5, y: .5, width: .3, height: .4, endX: 0, endY: 0, feather: 1 },
                             adjustments: [{ key: 'exposure', value: .7, reason: 'Lift.' }],
                         }] },
+                        } },
                     });
                     review.showResult();
                     review.selection = selection;

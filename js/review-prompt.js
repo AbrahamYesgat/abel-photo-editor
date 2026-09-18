@@ -143,7 +143,7 @@ You cannot crop, retouch, edit pixels, manipulate objects, or use tools. Never o
 arbitrary geometry, hard outlines, segmentation, curves, clarity, dehaze, detail,
 content-editing, or other unsupported controls. Only the bounded soft masks below are allowed.
 Suggested adjustments are lighting/color controls from the allowlist below only, with distinct
-keys, valid ranges, and a concise visual reason for each. Prefer a few conservative changes:
+keys, valid ranges, and a concise visual reason for each. For Refine prefer conservative changes:
 normally exposure change <= 0.75; contrast/highlights/shadows/whites/blacks <= 20;
 temperature/tint/vibrance/saturation <= 15; HSL hue <= 10, saturation/luminance <= 15.
 These are changes relative to the supplied values, but output the resulting absolute targets.
@@ -151,14 +151,31 @@ Use the listed step increments and never exceed a slider's full range. Avoid off
 or duplicative changes. HSL slots run red, orange, yellow, green, aqua, blue, purple, magenta.
 An empty adjustments array is a valid and often desirable result.
 
-GLOBAL VERSUS ADAPTIVE ALTERNATIVES
-Return two independent alternatives from the SAME current preview and slider baseline.
-Top-level adjustments is the Global alternative (absolute global targets).
-adaptive contains adjustments (its OWN absolute global targets, often empty) and regions.
+THREE INTENSITIES, SIX INDEPENDENT RECIPES, ONE RESPONSE
+Return variants with EXACT keys refine, balanced, expressive. Each contains adjustments
+(Global absolute targets) and adaptive {adjustments,regions}. All six recipes start from
+the SAME current preview and slider baseline. Author each independently; do not multiply
+one recipe, mechanically add sliders, or invent a different critique or rating per variant.
+Refine: conservative, preserve-first finishing.
+Balanced (default): perceptible, image-justified improvement while preserving character.
+Expressive: stronger intentional interpretation of light/color, with a coherent photographic
+direction; not exaggerated random sliders. Fog, haze, silhouettes, muted palettes, skin and
+other artistic protections apply equally to ALL intensities. Honor the stated intent.
+Balanced typically needs no more than 1.25 EV / 30 tonal / 25 color relative change;
+Expressive typically no more than 2 EV / 45 tonal / 35 color. These are ceilings to consider,
+NOT targets or forced minimums. Use less, or no change, whenever warranted.
+Avoid invisible busywork when a meaningful improvement is justified. Do not invent faults
+or edits to make variants differ. Successful images may have identical or empty recipes.
+Each adaptive contains its OWN absolute global targets, often empty, and regions.
 Do NOT assume Global will be applied first; never stack or double-count the two alternatives.
 The user selects one alternative; cloud review may apply it immediately after validation when
 the user clicks Review & apply. Other workflows require a separate Apply. If neither improves the photograph,
-return adjustments:[] and adaptive:{adjustments:[],regions:[]}. Do not invent regions.
+return adjustments:[] and adaptive:{adjustments:[],regions:[]} for that intensity.
+Share just ONE overall critique, inferred intent and rating of the CURRENT photograph.
+COMPACT OUTPUT: maximum six global targets per recipe, preferably 1-4 high-value targets;
+prefer 0-2 regions, maximum 3. Adjustment reasons <=90 characters; regional reasons <=160.
+Keep summary <=300 characters and category feedback <=220; avoid repetitive prose.
+Return complete JSON within 6000 output tokens; never omit an intensity to fit the budget.
 
 SOFT REGIONAL LIGHTING/COLOR
 At most 3 new regions, each with name (<=80 characters), reason (<=400), geometry and
@@ -169,7 +186,14 @@ The preview already includes existing masks; they will be preserved unchanged.
 Regional values are offsets from ZERO, not global absolute targets. At full strength they
 add the regional lighting/color difference to the current composite; overlap can add up.
 Prefer separated regions and explain location, visible effect and possible spill in reason.
-Allowed regional keys and strict offset ranges: ${JSON.stringify(maskControls)}
+Allowed regional keys: ${Object.keys(maskControls).join(', ')}.
+Strict regional absolute offset maxima by intensity (symmetric +/-):
+${JSON.stringify(contract.regionalLimits)}
+tonal means contrast/highlights/shadows; color means temperature/tint/saturation.
+For EACH key, the SUM of absolute offsets across ALL new regions must also stay within
+that intensity's maximum, even if regions appear separated. This bounds overlap.
+Global+regional controls are clamped to the renderer's slider ranges; leave headroom near
+limits and avoid offsetting or doubling a global correction locally.
 Never put HSL, clarity, dehaze, sharpening, texture or detail in regional adjustments.
 
 Geometry always has exactly {type,x,y,width,height,endX,endY,feather}, all numbers in [0,1].

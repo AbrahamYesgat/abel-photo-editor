@@ -32,6 +32,18 @@
             })
     ));
     const MAX_REGIONS = 3;
+    const intensities = Object.freeze(['refine', 'balanced', 'expressive']);
+    const regionalLimits = Object.freeze({
+        refine: Object.freeze({ exposure: 0.75, tonal: 20, color: 15 }),
+        balanced: Object.freeze({ exposure: 1.25, tonal: 30, color: 25 }),
+        expressive: Object.freeze({ exposure: 2, tonal: 45, color: 35 })
+    });
+    const regionalControls = intensity => Object.fromEntries(Object.entries(maskControls).map(([key, control]) => {
+        const limits = regionalLimits[intensity];
+        const max = key === 'exposure' ? limits.exposure :
+            ['temperature', 'tint', 'saturation'].includes(key) ? limits.color : limits.tonal;
+        return [key, { ...control, min: -max, max }];
+    }));
     const MAX_IMAGE_BYTES = 1400000;
     const reviewCategories = Object.freeze([
         'Composition', 'Light / exposure', 'Color / tone',
@@ -158,7 +170,7 @@
         unique(result.map(item => item.key), 'adjustment');
         return result;
     }
-    function region(value) {
+    function region(value, intensity) {
         exact(value, ['name', 'reason', 'geometry', 'adjustments'], 'region');
         const g = value.geometry;
         // A fixed geometry shape keeps both providers' structured grammars small.
@@ -177,17 +189,32 @@
             throw new Error('Invalid soft gradient geometry.');
         }
         return { name: text(value.name, 80, 'region name'), reason: text(value.reason, 400, 'region reason'),
-            geometry, adjustments: changes(value.adjustments, maskControls, 4, 1) };
+            geometry, adjustments: changes(value.adjustments, regionalControls(intensity), 4, 1) };
     }
     function validateReview(value) {
+        if (value && Object.hasOwn(value, 'adjustments') && !Object.hasOwn(value, 'variants')) {
+            throw new Error('This is an older two-recipe review. Update the backend, or export a new prompt and request all three intensities.');
+        }
         exact(value, ['rating', 'summary', 'inferredIntent', 'categories', 'strengths',
-            'improvements', 'cropFeedback', 'portfolioVerdict', 'adjustments', 'adaptive'], 'review');
-        exact(value.adaptive, ['adjustments', 'regions'], 'adaptive');
-        const adaptive = {
-            adjustments: changes(value.adaptive.adjustments),
-            regions: list(value.adaptive.regions, MAX_REGIONS, 'regions', region)
-        };
-        unique(adaptive.regions.map(item => item.name.trim().toLowerCase()), 'region name');
+            'improvements', 'cropFeedback', 'portfolioVerdict', 'variants'], 'review');
+        exact(value.variants, intensities, 'intensities');
+        const variants = Object.fromEntries(intensities.map(intensity => {
+            const variant = value.variants[intensity];
+            exact(variant, ['adjustments', 'adaptive'], 'variant');
+            exact(variant.adaptive, ['adjustments', 'regions'], 'adaptive');
+            const adaptive = {
+                adjustments: changes(variant.adaptive.adjustments, controls, 6),
+                regions: list(variant.adaptive.regions, MAX_REGIONS, 'regions', item => region(item, intensity))
+            };
+            unique(adaptive.regions.map(item => item.name.trim().toLowerCase()), 'region name');
+            // Even fully overlapping new masks cannot exceed this intensity's offset budget.
+            for (const [key, control] of Object.entries(regionalControls(intensity))) {
+                const total = adaptive.regions.reduce((sum, item) => sum +
+                    Math.abs(item.adjustments.find(change => change.key === key)?.value || 0), 0);
+                if (total > control.max + 1e-9) throw new Error(`Combined regional ${key} exceeds ${intensity} bounds.`);
+            }
+            return [intensity, { adjustments: changes(variant.adjustments, controls, 6), adaptive }];
+        }));
         exact(value.inferredIntent, ['genre', 'interpretation', 'intentionalTraits'], 'inferred intent');
         const inferredIntent = {
             genre: text(value.inferredIntent.genre, 80, 'genre'),
@@ -213,7 +240,6 @@
         }, reviewCategories.length);
         unique(categories.map(category => category.name.trim().toLowerCase()), 'category');
         categories.sort((a, b) => reviewCategories.indexOf(a.name) - reviewCategories.indexOf(b.name));
-        const adjustments = changes(value.adjustments);
         const strings = (items, label) => {
             const result = list(items, 3, label, item => text(item, 400, label));
             unique(result.map(item => item.trim().toLowerCase()), label);
@@ -228,8 +254,7 @@
             improvements: strings(value.improvements, 'improvements'),
             cropFeedback: text(value.cropFeedback, 600, 'crop feedback'),
             portfolioVerdict,
-            adjustments,
-            adaptive
+            variants
         };
     }
     const stringSchema = maxLength => ({ type: 'string', minLength: 1, maxLength });
@@ -263,9 +288,10 @@
             label: { type: 'string', enum: portfolioVerdicts },
             reason: stringSchema(400)
         }),
-        adjustments: changeSchema(controls, keys.length),
+        variants: objectSchema(Object.fromEntries(intensities.map(intensity => [intensity, objectSchema({
+        adjustments: changeSchema(controls, 6),
         adaptive: objectSchema({
-            adjustments: changeSchema(controls, keys.length),
+            adjustments: changeSchema(controls, 6),
             regions: { type: 'array', maxItems: MAX_REGIONS, items: objectSchema({
                 name: stringSchema(80), reason: stringSchema(400),
                 geometry: objectSchema({
@@ -273,10 +299,12 @@
                     x: unitSchema, y: unitSchema, width: unitSchema, height: unitSchema,
                     endX: unitSchema, endY: unitSchema, feather: unitSchema
                 }),
-                adjustments: changeSchema(maskControls, 4, 1)
+                adjustments: changeSchema(regionalControls(intensity), 4, 1)
             }) }
         })
+        })])))
     });
     return Object.freeze({ controls, readAdjustments, validateRequest, validateReview, reviewSchema,
-        reviewCategories, portfolioVerdicts, maskControls, MAX_REGIONS, MAX_IMAGE_BYTES });
+        reviewCategories, portfolioVerdicts, maskControls, intensities, regionalLimits,
+        regionalControls, MAX_REGIONS, MAX_IMAGE_BYTES });
 });

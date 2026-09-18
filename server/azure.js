@@ -46,7 +46,7 @@ function azureConfig(env, positive) {
     if (configured && !env.REVIEW_ACCESS_TOKEN) throw new Error('Azure review requires REVIEW_ACCESS_TOKEN, even on loopback.');
     return { azure: {
         endpoint: endpoint.replace(/\/$/, ''), deployment, model, key, configured,
-        maxTokens: positive(env.AZURE_REVIEW_MAX_COMPLETION_TOKENS, 8192, 'AZURE_REVIEW_MAX_COMPLETION_TOKENS', 12000),
+        maxTokens: positive(env.AZURE_REVIEW_MAX_COMPLETION_TOKENS, 12000, 'AZURE_REVIEW_MAX_COMPLETION_TOKENS', 16000),
         timeoutMs: positive(env.AZURE_REVIEW_TIMEOUT_MS, 120000, 'AZURE_REVIEW_TIMEOUT_MS', 120000),
         monthlyLimit: positive(env.AZURE_REVIEW_MONTHLY_LIMIT, 100, 'AZURE_REVIEW_MONTHLY_LIMIT', 1000),
         budgetDir: path.resolve(env.AZURE_REVIEW_BUDGET_DIR || '.azure-budget')

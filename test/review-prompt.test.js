@@ -54,7 +54,7 @@ test('both providers share bounded optional soft-region instructions without seg
         'Their normalized distance must be >=0.2', 'No crop is ever applied']) {
         assert.ok(systemInstruction.includes(rule), rule);
     }
-    assert.ok(systemInstruction.includes(JSON.stringify(require('../js/review-contract.js').maskControls)));
+    assert.ok(systemInstruction.includes(JSON.stringify(require('../js/review-contract.js').regionalLimits)));
 });
 
 test('localization specifies image-grounded extents, radii conversion, gradient spill and uncertain-region omission', () => {

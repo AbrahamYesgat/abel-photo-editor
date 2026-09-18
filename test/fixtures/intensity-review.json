@@ -1,0 +1,54 @@
+{
+  "rating": 7.5,
+  "summary": "A quiet scene with warm light. The foreground could have more presence without losing the subdued background.",
+  "inferredIntent": {"genre": "Landscape", "interpretation": "The warm light appears intended to create a quiet atmosphere.", "intentionalTraits": ["Subdued background"]},
+  "categories": [
+    {"name": "Composition", "score": 8, "feedback": "The foreground anchors the frame."},
+    {"name": "Light / exposure", "score": 7, "feedback": "The foreground is a little heavy relative to the warm sky."},
+    {"name": "Color / tone", "score": 8, "feedback": "The warm palette supports the mood."},
+    {"name": "Technical execution", "score": 7, "feedback": "Fine detail cannot be judged from this preview."},
+    {"name": "Moment / story / impact", "score": 8, "feedback": "The quiet light gives the scene a coherent feeling."}
+  ],
+  "strengths": ["Coherent warm light."],
+  "improvements": ["Give the foreground more presence without flattening the background."],
+  "cropFeedback": "Keep the framing and its quiet space.",
+  "portfolioVerdict": {"label": "Borderline", "reason": "Clear mood, with slightly unresolved foreground light."},
+  "variants": {
+    "refine": {
+      "adjustments": [{"key": "exposure", "value": 0.15, "reason": "Gently improve foreground readability."}],
+      "adaptive": {"adjustments": [], "regions": [
+        {"name": "Quiet foreground", "reason": "Subtle lift at lower left; some adjacent ground receives spill.",
+         "geometry": {"type": "radial", "x": 0.25, "y": 0.7, "width": 0.25, "height": 0.25, "endX": 0, "endY": 0, "feather": 1},
+         "adjustments": [{"key": "exposure", "value": 0.2, "reason": "Keep foreground legible."}]}
+      ]}
+    },
+    "balanced": {
+      "adjustments": [
+        {"key": "exposure", "value": 0.5, "reason": "Give the darker foreground presence."},
+        {"key": "highlights", "value": -14, "reason": "Keep the bright sky gentle."},
+        {"key": "temperature", "value": 6, "reason": "Unify the light."},
+        {"key": "vibrance", "value": 8, "reason": "Separate the subdued colors."}
+      ],
+      "adaptive": {"adjustments": [{"key": "temperature", "value": 4, "reason": "Keep the warm palette."}], "regions": [
+        {"name": "Foreground presence", "reason": "Lower-center lift; nearby ground also receives light.",
+         "geometry": {"type": "radial", "x": 0.5, "y": 0.7, "width": 0.3, "height": 0.25, "endX": 0, "endY": 0, "feather": 1},
+         "adjustments": [{"key": "exposure", "value": 0.55, "reason": "Improve foreground presence."}]},
+        {"name": "Soft sky", "reason": "Upper field restraint; the horizon may receive some spill.",
+         "geometry": {"type": "gradient", "x": 0, "y": 0.5, "width": 0, "height": 0, "endX": 0, "endY": 0, "feather": 1},
+         "adjustments": [{"key": "highlights", "value": -12, "reason": "Keep sky luminous, not dominant."}]}
+      ]}
+    },
+    "expressive": {
+      "adjustments": [
+        {"key": "contrast", "value": 24, "reason": "Emphasize the warm-light tonal structure."},
+        {"key": "temperature", "value": 14, "reason": "Interpret the scene as warmer evening light."},
+        {"key": "shadows", "value": 22, "reason": "Retain readable dark forms."}
+      ],
+      "adaptive": {"adjustments": [{"key": "temperature", "value": 12, "reason": "Lean into evening warmth."}], "regions": [
+        {"name": "Warm-light emphasis", "reason": "Lower-right light interpretation; nearby ground also brightens.",
+         "geometry": {"type": "radial", "x": 0.75, "y": 0.65, "width": 0.25, "height": 0.3, "endX": 0, "endY": 0, "feather": 1},
+         "adjustments": [{"key": "exposure", "value": 1.1, "reason": "Create a stronger pool of evening light."}]}
+      ]}
+    }
+  }
+}

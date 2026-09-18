@@ -10,12 +10,13 @@ const { createServer, loadConfig } = require('../server/index.js');
 const { responseSchema } = require('../server/azure.js');
 const { controls, reviewCategories } = require('../js/review-contract.js');
 const { azureSystemInstruction } = require('../server/prompt.js');
+const reviewFixture = require('./helpers/review-fixture.cjs');
 
 const request = () => ({
     image: Buffer.from('ffd8ffc0000b080001000101011100ffda0008010100003f0000ffd9', 'hex').toString('base64'),
     adjustments: Object.fromEntries(Object.keys(controls).map(key => [key, 0])), intent: 'Preserve the mood.'
 });
-const result = () => ({
+const result = () => reviewFixture({
     rating: 7, summary: 'A synthetic tonal study.',
     inferredIntent: { genre: 'Abstract', interpretation: 'Muted tones appear intentional.', intentionalTraits: ['Muted tones'] },
     categories: reviewCategories.map(name => ({ name, score: 7, feedback: 'The tonal relationship supports this study.' })),
@@ -52,7 +53,7 @@ async function setup(t, overrides = {}, upstream = async () => Response.json(com
 
 test('Azure configuration is explicit, authenticated and limited to trusted resource origins', () => {
     assert.equal(loadConfig({}).azure.configured, false);
-    assert.equal(loadConfig(env()).azure.maxTokens, 8192);
+    assert.equal(loadConfig(env()).azure.maxTokens, 12000);
     assert.equal(loadConfig(env()).azure.monthlyLimit, 100);
     for (const endpoint of [
         'http://abel.openai.azure.com', 'https://evil.example', 'https://abel.openai.azure.com.evil.example',
@@ -61,7 +62,7 @@ test('Azure configuration is explicit, authenticated and limited to trusted reso
     ]) assert.throws(() => loadConfig({ ...env(), AZURE_OPENAI_ENDPOINT: endpoint }), /AZURE_OPENAI_ENDPOINT/);
     for (const changes of [
         { REVIEW_ACCESS_TOKEN: '' }, { AZURE_OPENAI_DEPLOYMENT: '../other' }, { AZURE_OPENAI_MODEL: '' },
-        { AZURE_REVIEW_MAX_COMPLETION_TOKENS: '12001' }, { AZURE_REVIEW_MONTHLY_LIMIT: '1001' }
+        { AZURE_REVIEW_MAX_COMPLETION_TOKENS: '16001' }, { AZURE_REVIEW_MONTHLY_LIMIT: '1001' }
     ]) assert.throws(() => loadConfig({ ...env(), ...changes }));
 });
 
@@ -76,7 +77,7 @@ test('Azure schema retains closed required objects and enums, with unsupported b
     }
     inspect(responseSchema);
     assert.doesNotMatch(JSON.stringify(responseSchema), /"(minimum|maximum|minItems|maxItems|minLength|maxLength)":/);
-    assert.deepEqual(responseSchema.properties.adjustments.items.properties.key.enum, Object.keys(controls));
+    assert.deepEqual(responseSchema.properties.variants.properties.balanced.properties.adjustments.items.properties.key.enum, Object.keys(controls));
     assert.match(responseSchema.properties.rating.description, /maximum: 10/);
 });
 
@@ -112,7 +113,7 @@ test('Azure sends one bounded vision + strict-schema request without temperature
         assert.equal(options.headers.Authorization, undefined);
         const payload = JSON.parse(options.body);
         assert.equal(payload.model, 'abel-critic');
-        assert.equal(payload.max_completion_tokens, 8192);
+        assert.equal(payload.max_completion_tokens, 12000);
         assert.equal(payload.reasoning_effort, 'low');
         assert.equal(payload.temperature, undefined);
         assert.equal(payload.max_tokens, undefined);

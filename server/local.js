@@ -126,7 +126,7 @@ function createLocalProvider({ config, fetchImpl, SafeError, readUpstream }) {
                 { role: 'user', content: JSON.stringify({ adjustments: request.adjustments, intent: request.intent }),
                     images: [request.image] }
             ],
-            options: { temperature: 0.2, num_ctx: 8192, num_predict: 4096 }
+            options: { temperature: 0.2, num_ctx: 16384, num_predict: 6144 }
         }, controller);
         try {
             return validateReview(parseJSON(await readChat(response)));

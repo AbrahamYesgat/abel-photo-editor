@@ -1190,6 +1190,10 @@ class App {
             for (const [key, val] of Object.entries(mask.adjustments)) {
                 if (typeof mergedAdj[key] === 'number') {
                     mergedAdj[key] = (mergedAdj[key] || 0) + val;
+                    if (mask.blend === 'additive' && ReviewContract.controls[key]) {
+                        const { min, max } = ReviewContract.controls[key];
+                        mergedAdj[key] = Math.max(min, Math.min(max, mergedAdj[key]));
+                    }
                 }
             }
             mergedAdj.showOriginal = false;
@@ -2096,6 +2100,7 @@ class CropTool {
     activate() {
         if (!this.app.image) return;
         this.active = true;
+        this.app.review?.updateButtons();
         this.rotation = 0;
         this.cropX = 0; this.cropY = 0;
         this.cropW = 1; this.cropH = 1;
@@ -2130,6 +2135,7 @@ class CropTool {
 
     deactivate() {
         this.active = false;
+        this.app.review?.updateButtons();
         this.overlay.classList.remove('active');
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
         document.getElementById('mobile-crop-bar')?.classList.remove('visible');

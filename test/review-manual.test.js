@@ -6,8 +6,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const contract = require('../js/review-contract.js');
 const manual = require('../js/review-manual.js');
+const reviewFixture = require('./helpers/review-fixture.cjs');
 
-const response = () => ({
+const response = () => reviewFixture({
     rating: 8, summary: 'Quiet light.',
     inferredIntent: { genre: 'Landscape', interpretation: 'Appears quiet.', intentionalTraits: [] },
     categories: contract.reviewCategories.map(name => ({ name, score: 8, feedback: 'Subtle light.' })),
@@ -65,16 +66,13 @@ test('manual explains malformed mobile pastes without repairing or changing reci
     assert.throws(() => manual.parseResponse('{"rating":8,"rating":7}'), /Duplicate JSON field/);
 });
 
-test('reported mobile recipe passes unchanged with four global edits and two adaptive masks', () => {
+test('older mobile recipes receive an actionable re-export error, not invented intensities', () => {
     const text = fs.readFileSync(require.resolve('./fixtures/mobile-review.json'), 'utf8');
-    const result = manual.parseResponse(text);
-    assert.deepEqual(result, JSON.parse(text));
-    assert.equal(result.adjustments.length, 4);
-    assert.equal(result.adaptive.regions.length, 2);
+    assert.throws(() => manual.parseResponse(text), /older two-recipe.*export a new prompt/);
 });
 
 test('opt-in repair imports the exact mobile recipe without changing text or numeric edit values', () => {
-    const text = fs.readFileSync(require.resolve('./fixtures/mobile-review.json'), 'utf8').trim();
+    const text = fs.readFileSync(require.resolve('./fixtures/intensity-review.json'), 'utf8').trim();
     const mobile = smartDelimiters(text);
     assert.throws(() => manual.parseResponse(mobile), /Invalid JSON/);
     const fixed = manual.repairSmartQuotes(mobile);
@@ -155,7 +153,7 @@ test('repair retains shared duplicate detection including escaped aliases and by
 
 test('manual rejects unsupported, missing, nonfinite, oversized and out-of-bounds recipes without repairs', () => {
     for (const mutate of [
-        value => { delete value.adaptive; },
+        value => { delete value.variants.balanced.adaptive; },
         value => { value.tool = 'retouch'; },
         value => { value.rating = '8'; },
         value => { value.adjustments = [{ key: 'exposure', value: 6, reason: 'Lift' }]; },

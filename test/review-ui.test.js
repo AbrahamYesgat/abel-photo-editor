@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const ReviewContract = require('../js/review-contract.js');
 const ReviewManual = require('../js/review-manual.js');
+const reviewFixture = require('./helpers/review-fixture.cjs');
 
 function memoryStorage() {
     const values = new Map();
@@ -28,6 +29,8 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         replaceChildren(...children) { this.children = children; },
         append(...children) { this.children.push(...children); },
         appendChild(child) { this.children.push(child); },
+        querySelectorAll() { return []; },
+        setAttribute() {},
     });
     const document = {
         addEventListener() {},
@@ -52,7 +55,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
             location: { origin: 'http://localhost:3000' }, localStorage: storage,
             listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; },
         },
-        ReviewContract, ReviewManual, console, setTimeout, clearTimeout, URL, AbortController,
+        ReviewContract, ReviewManual, ReviewJSON: require('../js/review-json.js'), console, setTimeout, clearTimeout, URL, AbortController,
         Blob, atob, navigator: {},
     });
     vm.runInContext(readFileSync(path.join(__dirname, '../js/app.js'), 'utf8') + '\nthis.App = App;', context);
@@ -82,7 +85,8 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         'local-token-field', 'remember-local', 'local-storage-status', 'forget-local',
         'check-gemini', 'token-field', 'remember-gemini', 'gemini-storage-status', 'forget-gemini',
         'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
-        'manual-choice', 'manual-strength',
+        'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
+        'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
@@ -108,7 +112,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
 }
 
 function response(adjustments) {
-    return {
+    return reviewFixture({
         rating: 7.5,
         summary: 'Strong subject separation with room for a small exposure correction.',
         inferredIntent: { genre: 'Portrait', interpretation: 'The image appears intended to feel quiet.', intentionalTraits: ['Subdued light'] },
@@ -119,14 +123,115 @@ function response(adjustments) {
         cropFeedback: 'Keep the framing.',
         adjustments,
         adaptive: { adjustments: [], regions: [] },
-    };
+    });
 }
 
 function prepare(review, changes) {
     review.context = review.snapshot();
-    review.result = ReviewContract.validateReview(response(changes));
+    review.result = reviewFixture(ReviewContract.validateReview(response(changes)));
     review.selection = 'global';
 }
+
+test('six saved variants replace one transaction from a frozen masked baseline, including strength and undo/redo', () => {
+    const { app, review } = harness();
+    const originalMask = app.maskEngine.createMask('radial');
+    originalMask.adjustments.exposure = -0.15;
+    app.state.exposure = 0.1;
+    app.state.temperature = 2;
+    app._pushHistory();
+    prepare(review, []);
+    review.result = ReviewContract.validateReview(require('./fixtures/intensity-review.json'));
+    review.intensity = 'balanced';
+    review.selection = 'adaptive';
+    const baseline = review.snapshot();
+    const historyLength = app.history.length;
+    review.apply();
+    const initial = structuredClone(ReviewContract.readAdjustments(app.state));
+    assert.equal(app.maskEngine.masks.length, 3);
+    assert.equal(app.history.length, historyLength + 1);
+    for (const intensity of ['refine', 'expressive', 'balanced']) {
+        review.chooseIntensity(intensity);
+        assert.equal(review.result !== null, true);
+        assert.equal(app.maskEngine.masks[0].id, originalMask.id);
+        assert.equal(app.maskEngine.masks[0].adjustments.exposure, -0.15);
+        assert.equal(app.history.length, historyLength + 1);
+        assert.equal(review.beforeContext.edits, baseline.edits);
+    }
+    assert.deepEqual(ReviewContract.readAdjustments(app.state), initial);
+    assert.equal(app.maskEngine.masks.length, 3, 'old AI masks are replaced, not accumulated');
+    review.selection = 'global';
+    review.apply();
+    assert.equal(app.maskEngine.masks.length, 1);
+    assert.equal(app.state.exposure, 0.5);
+    review.elements.strength.value = '50';
+    review.apply();
+    assert.equal(app.state.exposure, 0.3, 'strength interpolates from 0.1, never the previous AI result');
+    const edited = review.snapshot().edits;
+    app._undo();
+    assert.equal(review.snapshot().edits, baseline.edits);
+    assert.equal(review.canCompare(), false);
+    assert.equal(review.elements['photo-controls'].hidden, false);
+    app._redo();
+    assert.equal(review.snapshot().edits, edited);
+    assert.equal(review.canCompare(), true);
+    app._undo();
+    review.chooseIntensity('expressive');
+    assert.equal(app.state.exposure, 0.1, 'an omitted slider returns to its original baseline');
+    assert.equal(app.history.length, historyLength + 1);
+    assert.equal(app.state.temperature, 8);
+});
+
+test('manual edits clear saved alternatives even when manually returning to the exact review baseline', () => {
+    for (const change of [
+        app => { app.state.exposure = 0; },
+        app => { app.curveEditor.channels.rgb[1].y = 220; },
+        app => { app.maskEngine.createMask('radial'); },
+        app => { app.image = {}; },
+    ]) {
+        const { app, review } = harness();
+        prepare(review, [{ key: 'exposure', value: 0.5, reason: 'Lift.' }]);
+        review.apply();
+        change(app);
+        app._render();
+        assert.equal(review.result, null);
+        assert.equal(review.elements['photo-controls'].hidden, true);
+        const edits = review.snapshot().edits;
+        review.chooseIntensity('expressive');
+        assert.equal(review.snapshot().edits, edits);
+    }
+});
+
+test('one request returns all intensities; no selection or strength switch calls the provider', async () => {
+    const { app, review, context } = geminiHarness();
+    let requests = 0;
+    context.fetch = async () => { requests++; return Response.json(require('./fixtures/intensity-review.json')); };
+    await review.analyze();
+    for (const intensity of ['expressive', 'refine', 'balanced', 'expressive']) review.chooseIntensity(intensity);
+    review.selection = 'adaptive';
+    review.elements.strength.value = '25';
+    review.apply();
+    assert.equal(requests, 1);
+    assert.equal(app.maskEngine.masks.length, 1);
+    assert.equal(app.maskEngine.masks[0].adjustments.exposure, 0.275);
+    assert.equal(app.history.length, 2);
+});
+
+test('intensity changes cancel in-flight one-click apply; duplicate response members are rejected', async () => {
+    const { app, review, context } = geminiHarness();
+    let finish;
+    context.fetch = () => new Promise(resolve => { finish = resolve; });
+    const pending = review.analyze();
+    review.chooseIntensity('expressive');
+    finish(Response.json(require('./fixtures/intensity-review.json')));
+    await pending;
+    assert.equal(review.result, null);
+    assert.equal(app.state.exposure, 0);
+    context.fetch = async () => new Response(JSON.stringify(require('./fixtures/intensity-review.json'))
+        .replace('"variants":{', '"variants":{"balanced":{},'), { headers: { 'Content-Type': 'application/json' } });
+    await review.analyze();
+    assert.match(review.elements.status.textContent, /Duplicate JSON field/);
+    assert.equal(app.history.length, 1);
+});
 
 function geminiHarness(options) {
     const fixture = harness({ initialize: true, ...options });
@@ -328,7 +433,7 @@ test('one Gemini click applies exactly the selected alternative once, retaining 
         assert.equal(app.maskEngine.masks.length, mode === 'adaptive' ? 1 : 0);
         if (mode === 'adaptive') assert.equal(app.maskEngine.masks[0].adjustments.exposure, 0.3);
         assert.equal(review.elements.apply.hidden, true);
-        assert.equal(review.elements['manual-choice'].hidden, true);
+        assert.equal(review.elements['manual-choice'].hidden, false);
         assert.equal(review.canCompare(), true);
         assert.match(review.elements.status.textContent, /applied/i);
         const historyLength = app.history.length;
@@ -351,9 +456,9 @@ test('Gemini review-only remains manual and selected empty or zero-strength reci
         context.fetch = async () => Response.json(response([{ key: 'exposure', value: 0.5, reason: 'Lift.' }]));
         await review.analyze();
         assert.equal(review.snapshot().edits, baseline);
-        assert.equal(app.history.length, historyLength);
-        assert.equal(review.canCompare(), false);
-        assert.match(review.elements.status.textContent, mode === 'review' ? /Nothing has changed/ : /nothing was applied/);
+        assert.equal(app.history.length, historyLength + (mode === 'review' ? 0 : 1));
+        assert.equal(review.canCompare(), mode !== 'review');
+        assert.match(review.elements.status.textContent, mode === 'review' ? /Nothing has changed/ : /applied/);
         assert.equal(review.elements.apply.hidden, mode !== 'review');
     }
 });
@@ -591,7 +696,7 @@ test('intent-first review renders new sections safely and shows genuine no-chang
     assert.ok(feedback.includes('No major issue identified.'));
     for (const name of ReviewContract.reviewCategories) assert.ok(feedback.includes(`${name}  7.0/10`));
     assert.ok(textOf(review.elements.adjustments).includes('No major lighting or color edit needed.'));
-    assert.equal(review.elements['apply-bar'].hidden, true);
+    assert.equal(review.elements['apply-bar'].hidden, false);
 });
 
 test('review applies only permitted color/light targets as one undoable transaction', () => {
@@ -691,7 +796,7 @@ test('adaptive selection is explicit, noncumulative, and applies masks plus its 
     assert.equal(review.canCompare(), true, 'redo can compare against the same baseline');
 });
 
-test('adaptive strength scales regional offsets, not geometry; zero creates no masks or history', () => {
+test('adaptive strength scales offsets, not geometry; zero is a baseline transaction ready to switch', () => {
     for (const strength of [0, 50, 100]) {
         const { app, review } = harness();
         prepare(review, []);
@@ -702,7 +807,7 @@ test('adaptive strength scales regional offsets, not geometry; zero creates no m
         review.apply();
         if (!strength) {
             assert.equal(app.maskEngine.masks.length, 0);
-            assert.equal(app.history.length, count);
+            assert.equal(app.history.length, count + 1);
         } else {
             assert.equal(app.maskEngine.masks[0].adjustments.exposure, 0.6 * strength / 100);
             assert.equal(app.maskEngine.masks[0].params.rx, 150);
@@ -1356,7 +1461,7 @@ test('manual import requires an export in this tab; malformed replies can be cor
     review.elements.paste.value = JSON.stringify(response([]));
     review.importManual();
     assert.ok(review.result);
-    assert.equal(review.elements['apply-bar'].hidden, true);
+    assert.equal(review.elements['apply-bar'].hidden, false);
     await review.exportManual();
     assert.equal(review.result, null);
     assert.equal(review.elements.paste.value, '');
@@ -1364,7 +1469,7 @@ test('manual import requires an export in this tab; malformed replies can be cor
 
 test('manual smart-quote repair is opt-in, transparent, transactional and never auto-applies', async () => {
     const { app, review } = manualHarness();
-    const text = readFileSync(path.join(__dirname, 'fixtures/mobile-review.json'), 'utf8').trim();
+    const text = readFileSync(path.join(__dirname, 'fixtures/intensity-review.json'), 'utf8').trim();
     const mobile = text.replace(/"(?:[^"\\]|\\.)*"/g, token => `“${token.slice(1, -1)}”`);
     review.updateButtons();
     assert.equal(review.elements['fix-quotes'].disabled, true);

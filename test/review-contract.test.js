@@ -5,12 +5,13 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const contract = require('../js/review-contract.js');
+const reviewFixture = require('./helpers/review-fixture.cjs');
 const { controls, readAdjustments, validateRequest, validateReview, reviewCategories } = contract;
 
 const image = '/9j/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBQMDAwUGBQUFBQYIBgYGBgYICggICAgICAoKCgoKCgoKDAwMDAwMDg4ODg4PDw8PDw8PDw8P/9sAQwECAgIEBAQHBAQHEAsJCxAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ/90ABAAB/9oADAMBAAIRAxEAPwD1yiiiv8qz/Sg//9k=';
 const adjustments = () => Object.fromEntries(Object.keys(controls).map(key => [key, 0]));
 const request = () => ({ image, adjustments: adjustments(), intent: '' });
-const review = () => ({
+const review = () => reviewFixture({
     rating: 7.5, summary: 'Warm, balanced light with an intentional dark background.',
     inferredIntent: { genre: 'Portrait', interpretation: 'The image appears intended to emphasize quiet warmth.', intentionalTraits: ['Dark background'] },
     categories: reviewCategories.map(name => ({ name, score: 8, feedback: 'The subject stands out from the background.' })),
@@ -51,9 +52,9 @@ test('valid requests and reviews return independent allowlisted objects, includi
     const result = validateReview(input);
     assert.deepEqual(result, input);
     assert.notEqual(result, input);
-    assert.notEqual(result.adjustments, input.adjustments);
+    assert.notEqual(result.variants.balanced.adjustments, input.adjustments);
     input.adjustments = [];
-    assert.deepEqual(validateReview(input).adjustments, []);
+    assert.deepEqual(validateReview(input).variants.balanced.adjustments, []);
     input.adjustments = [{ key: 'hslHue_7', value: -100, reason: 'Preserve the palette.' },
         { key: 'hslLum_0', value: 100, reason: 'Lift the reds.' }];
     assert.deepEqual(validateReview(input), input);
@@ -175,7 +176,7 @@ test('intent-first fields and five categories are required, bounded, and normali
     value.improvements = [];
     const validated = validateReview(value);
     assert.deepEqual(validated.categories.map(category => category.name), reviewCategories);
-    assert.deepEqual(validated.adjustments, []);
+    assert.deepEqual(validated.variants.balanced.adjustments, []);
     assert.deepEqual(validated.improvements, []);
     assert.notEqual(validated.inferredIntent, value.inferredIntent);
     assert.notEqual(validated.portfolioVerdict, value.portfolioVerdict);
@@ -183,12 +184,13 @@ test('intent-first fields and five categories are required, bounded, and normali
 
 test('Gemini schema closes every response object and enumerates the exact allowlist', () => {
     const schema = contract.reviewSchema;
-    for (const object of [schema, schema.properties.categories.items, schema.properties.adjustments.items,
+    const recipe = schema.properties.variants.properties.balanced;
+    for (const object of [schema, schema.properties.categories.items, recipe.properties.adjustments.items,
         schema.properties.inferredIntent, schema.properties.portfolioVerdict]) {
         assert.equal(object.additionalProperties, false);
         assert.deepEqual(object.required, Object.keys(object.properties));
     }
-    assert.deepEqual(schema.properties.adjustments.items.properties.key.enum, Object.keys(controls));
+    assert.deepEqual(recipe.properties.adjustments.items.properties.key.enum, Object.keys(controls));
     assert.deepEqual(schema.properties.categories.items.properties.name.enum, reviewCategories);
     assert.equal(schema.properties.categories.minItems, 5);
     assert.equal(schema.properties.categories.maxItems, 5);
@@ -201,12 +203,52 @@ const region = () => ({
     adjustments: [{ key: 'exposure', value: 0.3, reason: 'Gentle local lift.' }]
 });
 
+test('all six recipes are required and closed; missing or extra intensities are never synthesized', () => {
+    const source = require('./fixtures/intensity-review.json');
+    assert.deepEqual(validateReview(source), source);
+    for (const mutate of [
+        value => { delete value.variants.refine; },
+        value => { delete value.variants.expressive.adaptive; },
+        value => { value.variants.extra = value.variants.balanced; },
+        value => { value.variants.balanced.crop = {}; },
+        value => { value.variants.refine.adjustments.push({ ...value.variants.refine.adjustments[0] }); },
+        value => { value.variants.refine.adjustments[0].value = 5.1; },
+    ]) {
+        const value = structuredClone(source);
+        mutate(value);
+        assert.throws(() => validateReview(value));
+    }
+    const json = JSON.stringify(source).replace('"variants":{', '"variants":{"refine":{},');
+    assert.throws(() => require('../js/review-json.js').parseJSON(json), /Duplicate/);
+});
+
+test('regional bounds and total overlap budgets are intensity-specific, symmetric, and finite', () => {
+    for (const intensity of contract.intensities) {
+        for (const [key, control] of Object.entries(contract.regionalControls(intensity))) {
+            for (const sign of [-1, 1]) {
+                const value = review();
+                const local = { ...region(), adjustments: [{ key, value: sign * control.max, reason: 'Intentional light.' }] };
+                value.variants[intensity].adaptive.regions = [local];
+                assert.doesNotThrow(() => validateReview(value));
+                local.adjustments[0].value = sign * (control.max + 0.01);
+                assert.throws(() => validateReview(value), /adjustment value/);
+                local.adjustments[0].value = sign * control.max;
+                value.variants[intensity].adaptive.regions.push({ ...local, name: 'Second region' });
+                assert.throws(() => validateReview(value), /Combined regional/);
+            }
+        }
+    }
+    assert.equal(contract.regionalControls('refine').exposure.max, 0.75);
+    assert.equal(contract.regionalControls('balanced').exposure.max, 1.25);
+    assert.equal(contract.regionalControls('expressive').exposure.max, 2);
+});
+
 test('adaptive alternatives validate independent bases and normalized soft geometry', () => {
     const input = review();
     input.adaptive = { adjustments: [], regions: [region()] };
     const output = validateReview(input);
     assert.deepEqual(output, input);
-    assert.notEqual(output.adaptive.regions[0].geometry, input.adaptive.regions[0].geometry);
+    assert.notEqual(output.variants.balanced.adaptive.regions[0].geometry, input.adaptive.regions[0].geometry);
     input.adaptive.regions[0].geometry = {
         type: 'gradient', x: 0, y: 0, width: 0, height: 0, endX: 0, endY: 1, feather: 1
     };
@@ -218,7 +260,7 @@ test('adaptive alternatives validate independent bases and normalized soft geome
 
 test('adaptive rejects unknown actions, hard masks, invalid ranges, counts and degenerate geometry', () => {
     for (const mutate of [
-        v => { delete v.adaptive; },
+        v => { delete v.variants.balanced.adaptive; },
         v => { v.adaptive.maskId = 2; },
         v => { v.adaptive.regions[0].existingMask = 1; },
         v => { v.adaptive.regions[0].geometry.type = 'subject'; },
@@ -236,7 +278,7 @@ test('adaptive rejects unknown actions, hard masks, invalid ranges, counts and d
         v => { v.adaptive.regions[0].adjustments[0].key = 'hslHue_0'; },
         v => { v.adaptive.regions[0].adjustments[0].key = 'dehaze'; },
         v => { v.adaptive.regions[0].adjustments[0].key = 'sharpenAmount'; },
-        v => { v.adaptive.regions[0].adjustments[0].value = 0.76; },
+        v => { v.adaptive.regions[0].adjustments[0].value = 1.26; },
         v => { v.adaptive.regions[0].adjustments[0].value = -Infinity; },
         v => { v.adaptive.regions[0].adjustments = []; },
         v => { v.adaptive.regions[0].adjustments.push({ ...v.adaptive.regions[0].adjustments[0] }); },
@@ -249,7 +291,7 @@ test('adaptive rejects unknown actions, hard masks, invalid ranges, counts and d
         mutate(input);
         assert.throws(() => validateReview(input), Error);
     }
-    const schema = contract.reviewSchema.properties.adaptive;
+    const schema = contract.reviewSchema.properties.variants.properties.balanced.properties.adaptive;
     assert.equal(schema.additionalProperties, false);
     assert.equal(schema.properties.regions.maxItems, 3);
     assert.deepEqual(schema.properties.regions.items.properties.adjustments.items.properties.key.enum, Object.keys(contract.maskControls));

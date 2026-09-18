@@ -9,7 +9,7 @@
     <meta name="abel-azure-review-endpoint" content="https://abel-review-66c1d915.azurewebsites.net">
     <title>ABEL — Photo Editor</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/styles.css?v=intensities-1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L3 22h18L12 2z' fill='%236366f1'/><path d='M12 8l-4.5 10h9L12 8z' fill='%23818cf8'/></svg>">
@@ -100,6 +100,23 @@
             <canvas id="mask-overlay" style="display:none;"></canvas>
             <canvas id="crop-overlay" class="crop-overlay"></canvas>
             <span id="compare-label" class="compare-label" role="status" hidden>Before</span>
+            <div id="review-photo-controls" class="review-photo-controls" aria-label="Saved AI edits" hidden>
+                <div class="review-intensities" role="group" aria-label="Apply saved AI intensity">
+                    <button type="button" data-intensity="refine" aria-pressed="false">Refine</button>
+                    <button type="button" data-intensity="balanced" aria-pressed="false">Balanced</button>
+                    <button type="button" data-intensity="expressive" aria-pressed="false">Expressive</button>
+                </div>
+                <div class="review-photo-options">
+                    <select id="review-photo-mode" aria-label="Apply saved AI mode">
+                        <option value="global">Global</option>
+                        <option value="adaptive">Adaptive</option>
+                    </select>
+                    <input id="review-photo-strength" type="range" min="0" max="100" step="5" value="100" aria-label="Saved AI edit strength">
+                    <output id="review-photo-strength-value">100%</output>
+                    <button id="review-open-drawer" type="button">Review</button>
+                </div>
+                <span id="review-photo-state" class="review-photo-state" role="status"></span>
+            </div>
 
             <div class="drop-zone" id="drop-zone" style="cursor:pointer;">
                 <div class="drop-zone-content">
@@ -229,6 +246,13 @@
                 <label class="review-field-label" for="review-intent">What are you going for?</label>
                 <textarea id="review-intent" rows="2" maxlength="600" placeholder="Natural colors, moody portrait, warm sunset..."></textarea>
                 <p id="review-intent-note" class="review-note">The editable cloud-review default preserves the scene's existing mood; it is not a guess about your intent. Clear it or describe your own goal.</p>
+                <label class="review-field-label" for="review-intensity">AI editing intensity</label>
+                <select id="review-intensity">
+                    <option value="refine">Refine — subtle, preserve-first</option>
+                    <option value="balanced" selected>Balanced — perceptible, faithful improvement</option>
+                    <option value="expressive">Expressive — intentional light and color</option>
+                </select>
+                <p class="review-note">One review prepares all three, each with Global and Adaptive alternatives. After Apply, tap the controls beside the photo to switch without regenerating or stacking edits. Rating always describes the reviewed image.</p>
                 <div id="review-gemini-options">
                     <label class="review-field-label" for="review-gemini-mode">One-click action</label>
                     <select id="review-gemini-mode">
@@ -298,6 +322,7 @@
                         <button id="review-undo" class="btn btn-outline" disabled>Undo review</button>
                     </div>
                     <button id="review-compare" class="btn btn-outline" disabled>Hold to see before review</button>
+                    <button id="review-view-photo" class="btn btn-accent review-view-photo" hidden>View photo · switch intensities</button>
                 </div>
                 <p class="review-note">Touch and hold the photo to compare. Release to return to your edit.</p>
             </div>
@@ -476,12 +501,12 @@
 <script src="js/mask-engine.js"></script>
 <script src="js/auto-edit.js"></script>
 <script src="js/presets.js"></script>
-<script src="js/review-contract.js"></script>
-<script src="js/review-prompt.js"></script>
+<script src="js/review-contract.js?v=intensities-1"></script>
+<script src="js/review-prompt.js?v=intensities-1"></script>
 <script src="js/review-json.js"></script>
-<script src="js/review-manual.js"></script>
-<script src="js/review.js"></script>
-<script src="js/app.js"></script>
+<script src="js/review-manual.js?v=intensities-1"></script>
+<script src="js/review.js?v=intensities-1"></script>
+<script src="js/app.js?v=intensities-1"></script>
 
 <script>
     document.getElementById('export-quality').addEventListener('input', function() {

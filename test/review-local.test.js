@@ -9,10 +9,11 @@ const { isLoopback } = require('../server/local.js');
 const { localRequest } = require('../server/local-transport.js');
 const { controls, reviewSchema, reviewCategories } = require('../js/review-contract.js');
 const { systemInstruction } = require('../server/prompt.js');
+const reviewFixture = require('./helpers/review-fixture.cjs');
 
 const image = '/9j/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBQMDAwUGBQUFBQYIBgYGBgYICggICAgICAoKCgoKCgoKDAwMDAwMDg4ODg4PDw8PDw8PDw8P/9sAQwECAgIEBAQHBAQHEAsJCxAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ/90ABAAB/9oADAMBAAIRAxEAPwD1yiiiv8qz/Sg//9k=';
 const request = () => ({ image, adjustments: Object.fromEntries(Object.keys(controls).map(key => [key, 0])), intent: 'Keep the warm mood.' });
-const result = () => ({
+const result = () => reviewFixture({
     rating: 8, summary: 'Warm window light separates the subject from the darker wall.',
     inferredIntent: { genre: 'Portrait', interpretation: 'The light appears intended to separate the subject.', intentionalTraits: ['Dark background'] },
     categories: reviewCategories.map(name => ({ name, score: 8, feedback: 'The window light gives the subject definition.' })),
@@ -134,7 +135,7 @@ test('local review uses full contract and rubric with fixed image-only Ollama tr
     assert.equal(payload.stream, true);
     assert.equal(payload.think, false);
     assert.deepEqual(payload.format, reviewSchema);
-    assert.deepEqual(payload.options, { temperature: 0.2, num_ctx: 8192, num_predict: 4096 });
+    assert.deepEqual(payload.options, { temperature: 0.2, num_ctx: 16384, num_predict: 6144 });
     assert.deepEqual(payload.messages, [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: JSON.stringify({ adjustments: request().adjustments, intent: request().intent }), images: [image] }

@@ -7,12 +7,13 @@ const { once } = require('node:events');
 const { createServer, loadConfig, MAX_BODY_BYTES } = require('../server/index.js');
 const { controls, reviewCategories } = require('../js/review-contract.js');
 const { parseJSON } = require('../server/json.js');
+const reviewFixture = require('./helpers/review-fixture.cjs');
 const { geminiReviewSchema } = require('../server/schema.js');
 const { systemInstruction, critiqueRubric } = require('../server/prompt.js');
 
 const image = '/9j/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBQMDAwUGBQUFBQYIBgYGBgYICggICAgICAoKCgoKCgoKDAwMDAwMDg4ODg4PDw8PDw8PDw8P/9sAQwECAgIEBAQHBAQHEAsJCxAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ/90ABAAB/9oADAMBAAIRAxEAPwD1yiiiv8qz/Sg//9k=';
 const request = () => ({ image, adjustments: Object.fromEntries(Object.keys(controls).map(key => [key, 0])), intent: 'Keep the warm mood.' });
-const result = () => ({
+const result = () => reviewFixture({
     rating: 8, summary: 'A warm scene with gentle contrast.',
     inferredIntent: { genre: 'Portrait', interpretation: 'Warm tones appear intended to create intimacy.', intentionalTraits: ['Warm palette'] },
     categories: reviewCategories.map(name => ({ name, score: 8, feedback: 'Warm tones support the mood.' })),
@@ -63,13 +64,14 @@ test('provider schema preserves closed fields, enums and numeric bounds without 
     assert.equal(geminiReviewSchema.additionalProperties, false);
     assert.equal(geminiReviewSchema.properties.rating.minimum, 0);
     assert.equal(geminiReviewSchema.properties.rating.maximum, 10);
-    assert.deepEqual(geminiReviewSchema.properties.adjustments.items.properties.key.enum, Object.keys(controls));
-    assert.equal(geminiReviewSchema.properties.adjustments.items.additionalProperties, false);
+    const recipe = geminiReviewSchema.properties.variants.properties.balanced;
+    assert.deepEqual(recipe.properties.adjustments.items.properties.key.enum, Object.keys(controls));
+    assert.equal(recipe.properties.adjustments.items.additionalProperties, false);
     assert.equal(geminiReviewSchema.properties.categories.items.additionalProperties, false);
     assert.match(geminiReviewSchema.properties.summary.description, /1200 characters/);
-    assert.match(geminiReviewSchema.properties.adjustments.description, /34 items/);
+    assert.match(recipe.properties.adjustments.description, /6 items/);
     assert.doesNotMatch(JSON.stringify(geminiReviewSchema), /"(minLength|maxLength|minItems|maxItems)":/);
-    const adaptive = geminiReviewSchema.properties.adaptive;
+    const adaptive = recipe.properties.adaptive;
     assert.equal(adaptive.additionalProperties, false);
     assert.match(adaptive.properties.regions.description, /3 items/);
     assert.deepEqual(adaptive.properties.regions.items.properties.geometry.properties.type.enum, ['radial', 'gradient']);

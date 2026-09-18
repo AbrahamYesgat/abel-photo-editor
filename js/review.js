@@ -10,6 +10,7 @@ class ReviewPanel {
         this.beforeMasks = null;
         this.beforeContext = null;
         this.selection = '';
+        this.intensity = 'balanced';
         this.elements = {};
         this.cloudProvider = 'gemini';
         this.cloudConnections = {};
@@ -21,13 +22,34 @@ class ReviewPanel {
             'check-local', 'local-token-field', 'remember-local', 'local-storage-status', 'forget-local',
             'check-gemini', 'token-field', 'remember-gemini', 'gemini-storage-status', 'forget-gemini',
             'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
-            'manual-choice', 'manual-strength',
+            'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
+            'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
             'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
             'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
             this.elements[name] = document.getElementById(`review-${name}`);
         }
         const el = this.elements;
+        el.intensity.value = this.intensity;
+        el.intensity.addEventListener('change', () => this.chooseIntensity(el.intensity.value));
+        for (const button of el['photo-controls'].querySelectorAll('[data-intensity]')) {
+            button.addEventListener('click', () => this.chooseIntensity(button.dataset.intensity));
+        }
+        for (const type of ['click', 'pointerdown', 'touchstart', 'mousedown']) {
+            el['photo-controls'].addEventListener(type, event => event.stopPropagation());
+        }
+        el['photo-mode'].addEventListener('change', () => {
+            this.selection = el['photo-mode'].value;
+            el.alternative.value = this.selection;
+            this.apply();
+        });
+        el['photo-strength'].addEventListener('input', () => {
+            el.strength.value = el['photo-strength'].value;
+            this.apply();
+        });
+        el['view-photo'].addEventListener('click', () => document.getElementById('close-sidebar').click());
+        el['open-drawer'].addEventListener('click', () => document.querySelector(
+            window.innerWidth <= 700 ? '.mobile-tab[data-panel="review"]' : '.vtab[data-panel="review"]').click());
         el['local-endpoint'].value = this.localDefault();
         el.endpoint.value = window.location.origin;
         el.intent.value = this.defaultIntent();
@@ -42,8 +64,18 @@ class ReviewPanel {
         });
         for (const field of ['gemini-mode', 'gemini-strength']) {
             el[field].addEventListener(field === 'gemini-mode' ? 'change' : 'input', () => {
-                this.invalidate('Review action or strength changed. Click the new action when ready.');
                 el['gemini-strength-value'].value = `${el['gemini-strength'].value}%`;
+                if (this.controller) this.invalidate('Review action or strength changed. Click the new action when ready.');
+                else if (this.result) {
+                    if (field === 'gemini-mode') {
+                        const action = this.geminiAction();
+                        if (!action) { this.updateButtons(); return; }
+                        this.selection = action;
+                        el.alternative.value = action;
+                    } else el.strength.value = el['gemini-strength'].value;
+                    if (this.appliedContext) this.apply();
+                    else { this.showAdjustments(); this.updateButtons(); }
+                }
             });
         }
         el.provider.addEventListener('change', () => this.changeProvider());
@@ -99,8 +131,8 @@ class ReviewPanel {
         el.cancel.addEventListener('click', () => this.invalidate('Review cancelled. Nothing was applied.'));
         el.apply.addEventListener('click', () => this.apply());
         el.alternative.addEventListener('change', () => {
-            if (this.appliedContext) return;
             this.selection = el.alternative.value;
+            if (this.appliedContext) { this.apply(); return; }
             this.showAdjustments();
             this.updateButtons();
         });
@@ -125,6 +157,7 @@ class ReviewPanel {
         }
         el.strength.addEventListener('input', () => {
             el['strength-value'].value = `${el.strength.value}%`;
+            if (this.appliedContext) { this.apply(); return; }
             this.showAdjustments();
             this.updateButtons();
         });
@@ -135,7 +168,16 @@ class ReviewPanel {
     }
 
     defaultIntent() {
-        return 'Preserve the scene’s existing mood and intentional styling. Make only clearly justified lighting and color refinements.';
+        return 'Preserve the scene’s existing mood and intentional styling. Improve lighting and color where visibly justified, without changing the character of the photograph.';
+    }
+
+    chooseIntensity(value) {
+        if (!ReviewContract.intensities.includes(value)) return;
+        if (this.controller) this.invalidate('Intensity changed during review. Click Review again when ready.');
+        this.intensity = value;
+        this.elements.intensity.value = value;
+        if (this.appliedContext) this.apply();
+        else { this.showAdjustments(); this.updateButtons(); }
     }
 
     geminiStorageKey() { return `abel.${this.cloudProvider || 'gemini'}-connection.v1`; }
@@ -528,18 +570,17 @@ class ReviewPanel {
     }
 
     canCompare() {
-        return !!this.beforeState && this.matches(this.appliedContext);
+        return !!this.beforeState && this.matches(this.appliedContext) &&
+            this.app.history[this.app.historyIndex] === this.reviewHistory;
     }
 
     onRender() {
         if (this.context && !this.matches(this.context)) {
             this.invalidate('Photo or edits changed. Review again for up-to-date recommendations.');
-        } else if (this.appliedContext && !this.matches(this.appliedContext) && !this.matches(this.beforeContext)) {
-            this.appliedContext = null;
-            this.beforeState = null;
-            this.beforeMasks = null;
-            this.beforeContext = null;
-            this.setStatus('Edits changed. Use the toolbar undo/redo, or request a fresh review.');
+        } else if (this.appliedContext && !(
+            (this.app.history[this.app.historyIndex] === this.reviewHistory && this.matches(this.appliedContext)) ||
+            (this.app.history[this.app.historyIndex] === this.baselineHistory && this.matches(this.beforeContext)))) {
+            this.invalidate('Edits changed. Saved AI alternatives were cleared to protect your work. Undo/redo still works.');
         }
         this.updateButtons();
     }
@@ -557,6 +598,9 @@ class ReviewPanel {
         this.beforeState = null;
         this.beforeMasks = null;
         this.beforeContext = null;
+        this.reviewHistory = null;
+        this.baselineHistory = null;
+        this.appliedOptions = null;
         this.selection = '';
         this.elements.alternative.value = '';
         this.elements['apply-bar'].hidden = true;
@@ -578,20 +622,39 @@ class ReviewPanel {
         el['gemini-options'].hidden = !gemini;
         el['intent-note'].hidden = !gemini;
         el['check-gemini'].disabled = busy;
-        el['manual-choice'].hidden = !!action;
-        el['manual-strength'].hidden = !!action;
-        el.apply.hidden = !!action;
+        el['manual-choice'].hidden = !!action && !this.result;
+        el['manual-strength'].hidden = !!action && !this.result;
+        el.apply.hidden = !!this.appliedContext || (!!action && !this.result);
         el.analyze.disabled = this.isManual() || !this.app.image || !el.consent.checked || busy || !!this.app.cropTool?.active;
         el.analyze.textContent = busy ? (this.checkingConnection ? 'Checking...' : 'Reviewing...')
             : action ? `Review & apply ${action === 'adaptive' ? 'Adaptive' : 'Global'}` : 'Review photo';
         el['check-local'].disabled = busy;
         el.cancel.hidden = !busy;
         el.apply.disabled = busy || !!this.app.cropTool?.active || !this.result || !this.matches(this.context) ||
-            !this.hasChanges() || !!this.appliedContext;
+            !this.selection || !!this.appliedContext;
         el.undo.disabled = !this.canCompare();
         el.compare.disabled = !this.canCompare();
-        el.strength.disabled = !!this.appliedContext;
-        el.alternative.disabled = !!this.appliedContext || busy;
+        el.strength.disabled = busy;
+        el.alternative.disabled = busy;
+        el.intensity.value = this.intensity || 'balanced';
+        const visible = !!this.appliedContext && !this.app.cropTool?.active && !this.app.maskMode;
+        el['photo-controls'].hidden = !visible;
+        el['view-photo'].hidden = !this.appliedContext;
+        el['photo-mode'].value = this.selection || 'global';
+        el['photo-strength'].value = el.strength.value;
+        el['photo-strength-value'].value = `${el.strength.value}%`;
+        el['strength-value'].value = `${el.strength.value}%`;
+        if (this.appliedContext) {
+            el['gemini-strength'].value = el.strength.value;
+            el['gemini-strength-value'].value = `${el.strength.value}%`;
+        }
+        const applied = this.canCompare();
+        el['photo-state'].textContent = applied ? `${this.intensity || 'balanced'} · ${this.selection} · hold photo for before review`
+            : 'Before review · choose an intensity to reapply';
+        for (const button of el['photo-controls'].querySelectorAll('[data-intensity]')) {
+            button.setAttribute('aria-pressed', String(applied && button.dataset.intensity === this.intensity));
+            button.disabled = busy;
+        }
         el.export.disabled = !this.isManual() || !this.app.image || busy || !!this.app.cropTool?.active;
         const manualReady = this.manualReady() && !busy && !this.app.cropTool?.active;
         for (const name of ['download-preview', 'download-prompt', 'copy-prompt']) {
@@ -785,11 +848,11 @@ class ReviewPanel {
         const action = this.geminiAction();
         const requestSettings = JSON.stringify({
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
-            intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value,
+            intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
         });
         const settingsUnchanged = () => requestSettings === JSON.stringify({
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
-            intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value,
+            intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
         });
         try {
             const endpoint = this.endpoint();
@@ -819,7 +882,9 @@ class ReviewPanel {
                     ? 'No local review companion found. Start the updated ABEL companion on this computer.'
                     : 'No review backend found. GitHub Pages cannot run cloud inference; connect your backend URL above.');
             }
-            const data = await response.json();
+            const responseText = await response.text();
+            if (responseText.length > 256 * 1024) throw new Error('Review response is too large.');
+            const data = ReviewJSON.parseJSON(responseText);
             connectionIssue = ['unauthorized', 'origin_denied', 'review_token_required', 'local_token_required', 'local_unauthorized'].includes(data.code);
             if (!response.ok) {
                 throw new Error(typeof data.error === 'string' ? data.error : `Review failed (${response.status}).`);
@@ -834,8 +899,7 @@ class ReviewPanel {
             else this.rememberGeminiConnection(endpoint);
             this.showResult(action, localProvider ? '100' : el['gemini-strength'].value);
             if (action) {
-                if (this.hasChanges()) this.apply();
-                else this.setStatus(`Review complete. ${action === 'adaptive' ? 'Adaptive' : 'Global'} has no changes at this strength; nothing was applied. The other alternative was not substituted.`);
+                this.apply();
             } else this.setStatus(this.hasSuggestions()
                 ? 'Review ready. Select Global or Adaptive, check strength and suggestions, then Apply. Nothing has changed yet.'
                 : 'Review ready. No lighting or color changes were recommended.');
@@ -897,7 +961,7 @@ class ReviewPanel {
         el.feedback.append(this.text('strong', result.portfolioVerdict.label));
         el.feedback.append(this.text('p', result.portfolioVerdict.reason));
         el.result.hidden = false;
-        el['apply-bar'].hidden = !this.hasSuggestions();
+        el['apply-bar'].hidden = false;
         this.selection = selection;
         el.alternative.value = selection;
         el.strength.value = strength;
@@ -906,8 +970,8 @@ class ReviewPanel {
     }
 
     hasSuggestions() {
-        return !!this.result && !!(this.result.adjustments.length ||
-            this.result.adaptive.adjustments.length || this.result.adaptive.regions.length);
+        return !!this.result && Object.values(this.result.variants).some(variant =>
+            variant.adjustments.length || variant.adaptive.adjustments.length || variant.adaptive.regions.length);
     }
 
     strength() {
@@ -916,14 +980,16 @@ class ReviewPanel {
     }
 
     proposal() {
-        if (this.selection === 'global') return { adjustments: this.result.adjustments, regions: [] };
-        if (this.selection === 'adaptive') return this.result.adaptive;
+        const variant = this.result?.variants[this.intensity || 'balanced'];
+        if (variant && this.selection === 'global') return { adjustments: variant.adjustments, regions: [] };
+        if (variant && this.selection === 'adaptive') return variant.adaptive;
         return { adjustments: [], regions: [] };
     }
 
     targets() {
-        if (!this.result || !this.context) return [];
-        const state = JSON.parse(this.context.edits).state;
+        const context = this.beforeContext || this.context;
+        if (!this.result || !context) return [];
+        const state = JSON.parse(context.edits).state;
         const current = ReviewContract.readAdjustments(state);
         const strength = this.strength();
         return this.proposal().adjustments.map(change => {
@@ -940,7 +1006,7 @@ class ReviewPanel {
     }
 
     regions() {
-        if (!this.result || !this.context || !this.strength()) return [];
+        if (!this.result || !(this.beforeContext || this.context) || !this.strength()) return [];
         return this.proposal().regions.map(region => ({
             ...region, adjustments: region.adjustments.map(change => ({
                 ...change, value: Number((change.value * this.strength()).toFixed(4))
@@ -1021,13 +1087,16 @@ class ReviewPanel {
     }
 
     apply() {
-        if (!this.result || !this.matches(this.context) || this.appliedContext || this.app.cropTool?.active) return;
+        const switching = !!this.appliedContext;
+        if (!this.result || !['global', 'adaptive'].includes(this.selection) || this.app.cropTool?.active ||
+            !Number.isFinite(Number(this.elements.strength.value)) ||
+            Number(this.elements.strength.value) < 0 || Number(this.elements.strength.value) > 100 ||
+            (switching ? !this.matches(this.appliedContext) && !this.matches(this.beforeContext) : !this.matches(this.context))) return;
         let rollback;
         try {
             ReviewContract.validateReview(this.result);
-            if (!this.hasChanges()) return;
             this.app._stopComparison();
-            const next = JSON.parse(JSON.stringify(this.app.state));
+            const next = JSON.parse(JSON.stringify(switching ? this.beforeState : this.app.state));
             for (const { key, value } of this.targets()) {
                 if (!Object.hasOwn(ReviewContract.controls, key)) throw new Error('Unsupported review adjustment.');
                 const hsl = /^(hslHue|hslSat|hslLum)_([0-7])$/.exec(key);
@@ -1035,25 +1104,36 @@ class ReviewPanel {
                 else next[key] = value;
             }
             const newMasks = this.app.maskEngine.buildReviewMasks(this.regions());
-            const beforeMasks = this.app.maskEngine.captureMasks();
+            const beforeMasks = switching ? this.beforeMasks : this.app.maskEngine.captureMasks();
             rollback = { state: this.app.state, masks: this.app.maskEngine.masks,
-                history: this.app.history, historyIndex: this.app.historyIndex };
+                history: this.app.history, historyIndex: this.app.historyIndex,
+                appliedContext: this.appliedContext, reviewHistory: this.reviewHistory };
             clearTimeout(this.app._historyDebounce);
-            this.app._pushHistory();
-            this.beforeState = JSON.parse(JSON.stringify(this.app.state));
-            this.beforeMasks = beforeMasks;
-            this.beforeContext = this.context;
+            if (!switching) {
+                this.app._pushHistory();
+                this.baselineHistory = this.app.history[this.app.historyIndex];
+                this.beforeState = JSON.parse(JSON.stringify(this.app.state));
+                this.beforeMasks = beforeMasks;
+                this.beforeContext = this.context;
+            }
+            const baselineIndex = this.app.history.indexOf(this.baselineHistory);
+            if (baselineIndex < 0) throw new Error('Review history is no longer available.');
+            if (switching) this.app.maskEngine.restoreMasks(beforeMasks);
             this.app.state = next;
             this.app.maskEngine.masks = [...this.app.maskEngine.masks, ...newMasks];
-            this.app._pushHistory();
+            this.app.history = this.app.history.slice(0, baselineIndex + 1);
+            this.app.historyIndex = baselineIndex;
+            this.app._pushHistory(true);
+            this.reviewHistory = this.app.history[this.app.historyIndex];
             this.app._syncSlidersFromState();
             this.app._updateMaskList();
             this.context = null;
             this.appliedContext = this.snapshot();
+            this.appliedOptions = { intensity: this.intensity || 'balanced', selection: this.selection,
+                strength: this.elements.strength.value };
             this.app._render();
-            this.setStatus(newMasks.length
-                ? 'Adaptive applied in one edit. Hold to compare or Undo. Soft regions may spill; inspect, redraw or delete them in Masks and adjust their sliders.'
-                : 'Lighting and color applied. Hold the photo to see before this review, or undo.');
+            this.showAdjustments();
+            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo — no new review. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
             this.updateButtons();
         } catch (error) {
             if (rollback) {
@@ -1061,15 +1141,25 @@ class ReviewPanel {
                 this.app.maskEngine.masks = rollback.masks;
                 this.app.history = rollback.history;
                 this.app.historyIndex = rollback.historyIndex;
-                this.appliedContext = null;
-                this.beforeState = null;
-                this.beforeMasks = null;
-                this.beforeContext = null;
+                this.appliedContext = rollback.appliedContext;
+                this.reviewHistory = rollback.reviewHistory;
+                if (!switching) {
+                    this.beforeState = null;
+                    this.beforeMasks = null;
+                    this.beforeContext = null;
+                }
                 this.app._syncSlidersFromState();
                 this.app._updateMaskList();
                 this.app._updateHistoryButtons();
             }
+            if (switching && this.appliedOptions) {
+                this.intensity = this.appliedOptions.intensity;
+                this.selection = this.appliedOptions.selection;
+                this.elements.alternative.value = this.selection;
+                this.elements.strength.value = this.appliedOptions.strength;
+            }
             this.setStatus(`Changes were not applied: ${error.message}`, true);
+            this.updateButtons();
         }
     }
 }

@@ -16,7 +16,7 @@ const region = {
     geometry: { type: 'radial', x: 0.75, y: 0.25, width: 0.12, height: 0.15, endX: 0, endY: 0, feather: 1 },
     adjustments: [{ key: 'exposure', value: 0.6, reason: 'Improve readability of this patch.' }],
 };
-const result = {
+const result = require('../test/helpers/review-fixture.cjs')({
     rating: 7, summary: 'Synthetic region-localization fixture.',
     inferredIntent: { genre: 'Abstract', interpretation: 'The blocks appear intended to study tonal separation.', intentionalTraits: ['Muted palette'] },
     categories: contract.reviewCategories.map(name => ({ name, score: 7, feedback: 'The upper image-right green patch contrasts with the gray field.' })),
@@ -24,7 +24,7 @@ const result = {
     cropFeedback: 'Keep the framing.', portfolioVerdict: { label: 'Borderline', reason: 'A simple tonal study.' },
     adjustments: [{ key: 'exposure', value: 0.3, reason: 'Optional whole-image lift.' }],
     adaptive: { adjustments: [], regions: [region] },
-};
+});
 
 async function run() {
     const server = createServer({ env: { GEMINI_API_KEY: '', LOCAL_REVIEW_ENABLED: 'false' },
