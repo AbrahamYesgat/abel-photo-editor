@@ -2,8 +2,8 @@
 
 const path = require('node:path');
 const { mkdir, open, readFile, rename, rm } = require('node:fs/promises');
-const { reviewSchema, validateReview } = require('../js/review-contract.js');
-const { azureSystemInstruction } = require('./prompt.js');
+const { reviewSchema, schemaForRequest, validateReview } = require('../js/review-contract.js');
+const { azureSystemInstruction, detailInstruction, requestData } = require('./prompt.js');
 const { parseJSON } = require('./json.js');
 
 // Keep constraints in the prompt and runtime validator; Azure's strict grammar
@@ -102,13 +102,13 @@ function createAzureProvider({ config, fetchImpl, SafeError, readUpstream }) {
                         max_completion_tokens: azure.maxTokens,
                         ...(azure.model.startsWith('gpt-5') ? { reasoning_effort: 'low' } : {}),
                         messages: [
-                            { role: 'system', content: azureSystemInstruction },
+                            { role: 'system', content: azureSystemInstruction + detailInstruction(request) },
                             { role: 'user', content: [
-                                { type: 'text', text: JSON.stringify({ adjustments: request.adjustments, intent: request.intent }) },
+                                { type: 'text', text: JSON.stringify(requestData(request)) },
                                 { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${request.image}`, detail: 'high' } }
                             ] }
                         ],
-                        response_format: { type: 'json_schema', json_schema: { name: 'photo_review', strict: true, schema: responseSchema } }
+                        response_format: { type: 'json_schema', json_schema: { name: 'photo_review', strict: true, schema: azureSchema(schemaForRequest(request)) } }
                     })
                 });
             } catch {
@@ -134,7 +134,7 @@ function createAzureProvider({ config, fetchImpl, SafeError, readUpstream }) {
                     choice.message.function_call) {
                     throw new Error('Incomplete output');
                 }
-                return validateReview(parseJSON(choice.message.content));
+                return validateReview(parseJSON(choice.message.content), request);
             } catch (error) {
                 if (error instanceof SafeError) throw error;
                 throw new SafeError(502, 'invalid_review', 'Azure returned an incomplete or invalid review. No changes were applied.');

@@ -105,6 +105,7 @@
                     <button type="button" data-intensity="refine" aria-pressed="false">Refine</button>
                     <button type="button" data-intensity="balanced" aria-pressed="false">Balanced</button>
                     <button type="button" data-intensity="expressive" aria-pressed="false">Expressive</button>
+                    <button id="review-photo-details" type="button" aria-pressed="false" aria-label="Include AI clarity in this saved treatment" title="Off keeps the same lighting/color treatment and your original clarity. No new AI call." hidden>Details</button>
                 </div>
                 <div class="review-photo-options">
                     <select id="review-photo-mode" aria-label="Apply saved AI mode">
@@ -253,6 +254,8 @@
                     <option value="expressive">Expressive — intentional light and color</option>
                 </select>
                 <p class="review-note">One review prepares all three, each with Global and Adaptive alternatives. After Apply, tap the controls beside the photo to switch without regenerating or stacking edits. Rating always describes the reviewed image.</p>
+                <label class="review-consent"><input id="review-allow-details" type="checkbox" aria-describedby="review-detail-note">Allow detail adjustments (clarity only)</label>
+                <p id="review-detail-note" class="review-note">Off by default. Optional small clarity changes, judged from a reduced preview—not full resolution. Intentional softness stays protected. Texture is not supported; sharpening and noise reduction stay manual. After Apply, Details compares the same cached light/color treatment with or without AI clarity, preserving your original detail settings. No extra AI call.</p>
                 <div id="review-gemini-options">
                     <label class="review-field-label" for="review-gemini-mode">One-click action</label>
                     <select id="review-gemini-mode">

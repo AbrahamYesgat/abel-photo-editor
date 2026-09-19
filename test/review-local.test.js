@@ -8,7 +8,7 @@ const { createServer, loadConfig, MAX_BODY_BYTES } = require('../server/index.js
 const { isLoopback } = require('../server/local.js');
 const { localRequest } = require('../server/local-transport.js');
 const { controls, reviewSchema, reviewCategories } = require('../js/review-contract.js');
-const { systemInstruction } = require('../server/prompt.js');
+const { systemInstruction, detailInstruction, requestData } = require('../server/prompt.js');
 const reviewFixture = require('./helpers/review-fixture.cjs');
 
 const image = '/9j/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBQMDAwUGBQUFBQYIBgYGBgYICggICAgICAoKCgoKCgoKDAwMDAwMDg4ODg4PDw8PDw8PDw8P/9sAQwECAgIEBAQHBAQHEAsJCxAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ/90ABAAB/9oADAMBAAIRAxEAPwD1yiiiv8qz/Sg//9k=';
@@ -45,7 +45,7 @@ test('local validates soft adaptive masks using the same contract, with no cloud
     assert.ok(calls.every(call => call.url.startsWith('http://127.0.0.1:11434/')));
     const request = JSON.parse(calls.find(call => call.url.endsWith('/api/chat')).body);
     assert.deepEqual(request.format.properties.adaptive, reviewSchema.properties.adaptive);
-    assert.equal(request.messages[0].content, systemInstruction);
+    assert.equal(request.messages[0].content, systemInstruction + detailInstruction());
 });
 
 async function setup(t, env = {}, fetchImpl = mock, host = '127.0.0.1', localFetch) {
@@ -137,8 +137,8 @@ test('local review uses full contract and rubric with fixed image-only Ollama tr
     assert.deepEqual(payload.format, reviewSchema);
     assert.deepEqual(payload.options, { temperature: 0.2, num_ctx: 16384, num_predict: 6144 });
     assert.deepEqual(payload.messages, [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: JSON.stringify({ adjustments: request().adjustments, intent: request().intent }), images: [image] }
+        { role: 'system', content: systemInstruction + detailInstruction() },
+        { role: 'user', content: JSON.stringify(requestData(request())), images: [image] }
     ]);
     assert.equal(payload.tools, undefined);
 });

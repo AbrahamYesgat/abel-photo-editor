@@ -1,6 +1,6 @@
 'use strict';
 
-const { reviewSchema } = require('../js/review-contract.js');
+const { reviewSchema, schemaForRequest } = require('../js/review-contract.js');
 
 // Gemini can reject the combined string/collection bounds as an overly complex
 // grammar. Keep them in descriptions; both runtime validators still enforce them.
@@ -20,4 +20,5 @@ function compatibleSchema(schema) {
     return result;
 }
 
-module.exports = { geminiReviewSchema: compatibleSchema(reviewSchema) };
+module.exports = { geminiReviewSchema: compatibleSchema(reviewSchema),
+    geminiSchemaForRequest: request => compatibleSchema(schemaForRequest(request)) };

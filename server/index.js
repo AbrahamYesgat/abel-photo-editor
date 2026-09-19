@@ -6,8 +6,8 @@ const { existsSync } = require('node:fs');
 const { readFile } = require('node:fs/promises');
 const { timingSafeEqual } = require('node:crypto');
 const { validateRequest, validateReview } = require('../js/review-contract.js');
-const { geminiReviewSchema } = require('./schema.js');
-const { geminiSystemInstruction } = require('./prompt.js');
+const { geminiSchemaForRequest } = require('./schema.js');
+const { geminiSystemInstruction, detailInstruction, requestData } = require('./prompt.js');
 const { parseJSON } = require('./json.js');
 const { isLoopback, localConfig, sameLocalOrigin, createLocalProvider } = require('./local.js');
 const { localRequest } = require('./local-transport.js');
@@ -156,15 +156,15 @@ async function review(request, config, fetchImpl, controller) {
                 method: 'POST', signal: controller.signal, redirect: 'error',
                 headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
                 body: JSON.stringify({
-                    systemInstruction: { parts: [{ text: geminiSystemInstruction }] },
+                    systemInstruction: { parts: [{ text: geminiSystemInstruction + detailInstruction(request) }] },
                     contents: [{ role: 'user', parts: [
                         { inlineData: { mimeType: 'image/jpeg', data: request.image } },
-                        { text: JSON.stringify({ adjustments: request.adjustments, intent: request.intent }) }
+                        { text: JSON.stringify(requestData(request)) }
                     ] }],
                     generationConfig: {
                         temperature: 0.2, maxOutputTokens: 8192,
                         ...(config.model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
-                        responseMimeType: 'application/json', responseJsonSchema: geminiReviewSchema
+                        responseMimeType: 'application/json', responseJsonSchema: geminiSchemaForRequest(request)
                     }
                 })
             }
@@ -199,7 +199,7 @@ async function review(request, config, fetchImpl, controller) {
         if (!Array.isArray(parts) || !parts.length) throw new Error('Missing output');
         const output = parts.filter(part => !part.thought);
         if (!output.length || output.some(part => typeof part.text !== 'string' || part.functionCall)) throw new Error('Invalid output');
-        return validateReview(parseJSON(output.map(part => part.text).join('')));
+        return validateReview(parseJSON(output.map(part => part.text).join('')), request);
     } catch (error) {
         if (error instanceof SafeError) throw error;
         throw new SafeError(502, 'invalid_review', 'The provider returned an incomplete or invalid review. No changes were applied.');

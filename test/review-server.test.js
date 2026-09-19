@@ -9,7 +9,7 @@ const { controls, reviewCategories } = require('../js/review-contract.js');
 const { parseJSON } = require('../server/json.js');
 const reviewFixture = require('./helpers/review-fixture.cjs');
 const { geminiReviewSchema } = require('../server/schema.js');
-const { systemInstruction, critiqueRubric } = require('../server/prompt.js');
+const { systemInstruction, critiqueRubric, detailInstruction } = require('../server/prompt.js');
 
 const image = '/9j/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwACAgICAgIDAgIDBQMDAwUGBQUFBQYIBgYGBgYICggICAgICAoKCgoKCgoKDAwMDAwMDg4ODg4PDw8PDw8PDw8P/9sAQwECAgIEBAQHBAQHEAsJCxAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ/90ABAAB/9oADAMBAAIRAxEAPwD1yiiiv8qz/Sg//9k=';
 const request = () => ({ image, adjustments: Object.fromEntries(Object.keys(controls).map(key => [key, 0])), intent: 'Keep the warm mood.' });
@@ -166,7 +166,7 @@ test('valid critique sends only fixed image/model/schema and returns validated a
     assert.equal(payload.generationConfig.responseJsonSchema.additionalProperties, false);
     assert.deepEqual(payload.generationConfig.responseJsonSchema, geminiReviewSchema);
     assert.match(payload.systemInstruction.parts[0].text, /ABSOLUTE targets/);
-    assert.equal(payload.systemInstruction.parts[0].text, require('../server/prompt.js').geminiSystemInstruction);
+    assert.equal(payload.systemInstruction.parts[0].text, require('../server/prompt.js').geminiSystemInstruction + detailInstruction());
     assert.ok(payload.systemInstruction.parts[0].text.includes(critiqueRubric));
     assert.equal(payload.systemInstruction.parts[0].text.includes(input.intent), false);
     const status = await (await fetch(`${base}/api/review/status`)).json();

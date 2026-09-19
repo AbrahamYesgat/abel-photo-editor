@@ -11,6 +11,8 @@ class ReviewPanel {
         this.beforeContext = null;
         this.selection = '';
         this.intensity = 'balanced';
+        this.includeDetails = false;
+        this.requestPolicy = null;
         this.elements = {};
         this.cloudProvider = 'gemini';
         this.cloudConnections = {};
@@ -24,12 +26,22 @@ class ReviewPanel {
             'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
             'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
             'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
+            'allow-details', 'photo-details',
             'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
             'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
             this.elements[name] = document.getElementById(`review-${name}`);
         }
         const el = this.elements;
+        el['allow-details'].checked = false;
+        el['allow-details'].addEventListener('change', () => {
+            this.invalidate('Detail permission changed. Request a new review; existing edits are unchanged.');
+        });
+        el['photo-details'].addEventListener('click', () => {
+            if (!this.hasDetails()) return;
+            this.includeDetails = !this.includeDetails;
+            this.apply();
+        });
         el.intensity.value = this.intensity;
         el.intensity.addEventListener('change', () => this.chooseIntensity(el.intensity.value));
         for (const button of el['photo-controls'].querySelectorAll('[data-intensity]')) {
@@ -169,6 +181,12 @@ class ReviewPanel {
 
     defaultIntent() {
         return 'Preserve the scene’s existing mood and intentional styling. Improve lighting and color where visibly justified, without changing the character of the photograph.';
+    }
+
+    detailRequest() {
+        return this.elements['allow-details'].checked
+            ? { allowDetails: true, detailAdjustments: { clarity: this.app.state.clarity } }
+            : { allowDetails: false };
     }
 
     chooseIntensity(value) {
@@ -554,6 +572,7 @@ class ReviewPanel {
     snapshot() {
         return {
             image: this.app.image,
+            allowDetails: !!this.elements['allow-details'].checked,
             edits: JSON.stringify({
                 state: this.app.state,
                 curves: this.app.curveEditor.channels,
@@ -566,7 +585,8 @@ class ReviewPanel {
     matches(context) {
         if (!context) return false;
         const current = this.snapshot();
-        return context.image === current.image && context.edits === current.edits;
+        return context.image === current.image && context.edits === current.edits &&
+            context.allowDetails === current.allowDetails;
     }
 
     canCompare() {
@@ -601,6 +621,8 @@ class ReviewPanel {
         this.reviewHistory = null;
         this.baselineHistory = null;
         this.appliedOptions = null;
+        this.requestPolicy = null;
+        this.includeDetails = false;
         this.selection = '';
         this.elements.alternative.value = '';
         this.elements['apply-bar'].hidden = true;
@@ -643,6 +665,9 @@ class ReviewPanel {
         el['photo-mode'].value = this.selection || 'global';
         el['photo-strength'].value = el.strength.value;
         el['photo-strength-value'].value = `${el.strength.value}%`;
+        el['photo-details'].hidden = !this.hasDetails();
+        el['photo-details'].disabled = busy;
+        el['photo-details'].setAttribute('aria-pressed', String(!!this.includeDetails));
         el['strength-value'].value = `${el.strength.value}%`;
         if (this.appliedContext) {
             el['gemini-strength'].value = el.strength.value;
@@ -697,13 +722,16 @@ class ReviewPanel {
         this.updateButtons();
         try {
             const adjustments = ReviewContract.readAdjustments(this.app.state);
+            const policy = this.detailRequest();
             const image = await this.preview();
             if (this.controller !== controller || !this.isManual() || !this.matches(baseline) ||
-                intent !== this.elements.intent.value.trim() || this.app.cropTool?.active) {
+                intent !== this.elements.intent.value.trim() ||
+                JSON.stringify(policy) !== JSON.stringify(this.detailRequest()) || this.app.cropTool?.active) {
                 if (this.controller === controller) this.invalidate('Photo or settings changed during export. Export again.');
                 return;
             }
-            const prompt = ReviewManual.buildPrompt({ image, adjustments, intent }, `${name}.jpg`);
+            this.requestPolicy = policy;
+            const prompt = ReviewManual.buildPrompt({ image, adjustments, intent, ...policy }, `${name}.jpg`);
             const bytes = Uint8Array.from(atob(image), character => character.charCodeAt(0));
             this.manualExport = { image: new Blob([bytes], { type: 'image/jpeg' }), prompt, name, intent };
             this.elements.prompt.value = prompt;
@@ -760,11 +788,11 @@ class ReviewPanel {
         this.elements['apply-bar'].hidden = true;
         try {
             if (fixQuotes) {
-                const repaired = ReviewManual.repairSmartQuotes(this.elements.paste.value);
+                const repaired = ReviewManual.repairSmartQuotes(this.elements.paste.value, this.requestPolicy || {});
                 this.result = repaired.review;
                 this.elements.paste.value = repaired.text;
             } else {
-                this.result = ReviewManual.parseResponse(this.elements.paste.value);
+                this.result = ReviewManual.parseResponse(this.elements.paste.value, this.requestPolicy || {});
             }
             this.showResult();
             this.setStatus((fixQuotes ? 'Smart-quote delimiters fixed; corrected JSON is shown above. ' : '') + (this.hasSuggestions()
@@ -849,10 +877,12 @@ class ReviewPanel {
         const requestSettings = JSON.stringify({
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
             intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
+            allowDetails: !!el['allow-details'].checked,
         });
         const settingsUnchanged = () => requestSettings === JSON.stringify({
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
             intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
+            allowDetails: !!el['allow-details'].checked,
         });
         try {
             const endpoint = this.endpoint();
@@ -861,8 +891,10 @@ class ReviewPanel {
                 image: this.preview(),
                 adjustments: ReviewContract.readAdjustments(this.app.state),
                 intent: el.intent.value.trim(),
+                ...this.detailRequest(),
             };
             ReviewContract.validateRequest(request);
+            this.requestPolicy = this.detailRequest();
             this.context = this.snapshot();
             controller = new AbortController();
             this.controller = controller;
@@ -894,7 +926,7 @@ class ReviewPanel {
                 this.invalidate('Photo, review settings or consent changed. Nothing was applied; request a fresh review.');
                 return;
             }
-            this.result = ReviewContract.validateReview(data);
+            this.result = ReviewContract.validateReview(data, this.requestPolicy);
             if (localProvider) this.rememberLocalConnection(endpoint);
             else this.rememberGeminiConnection(endpoint);
             this.showResult(action, localProvider ? '100' : el['gemini-strength'].value);
@@ -941,6 +973,7 @@ class ReviewPanel {
     showResult(selection = '', strength = '100') {
         const el = this.elements;
         const result = this.result;
+        this.includeDetails = this.requestPolicy?.allowDetails === true;
         el.feedback.replaceChildren();
         el.feedback.append(this.text('div', `${result.rating.toFixed(1)} / 10`, 'review-rating'));
         el.feedback.append(this.text('p', 'Subjective assessment of the current edit', 'review-note'));
@@ -979,25 +1012,46 @@ class ReviewPanel {
         return Number.isFinite(value) && value >= 0 && value <= 100 ? value / 100 : 0;
     }
 
-    proposal() {
+    rawProposal() {
         const variant = this.result?.variants[this.intensity || 'balanced'];
         if (variant && this.selection === 'global') return { adjustments: variant.adjustments, regions: [] };
         if (variant && this.selection === 'adaptive') return variant.adaptive;
         return { adjustments: [], regions: [] };
     }
 
+    hasDetails() {
+        if (!this.requestPolicy?.allowDetails) return false;
+        const proposal = this.rawProposal();
+        return proposal.adjustments.some(change => change.key === 'clarity') ||
+            proposal.regions.some(region => region.adjustments.some(change => change.key === 'clarity'));
+    }
+
+    proposal() {
+        const proposal = this.rawProposal();
+        if (this.includeDetails) return proposal;
+        const lightingOnly = changes => changes.filter(change => !Object.hasOwn(ReviewContract.detailControls, change.key));
+        return { adjustments: lightingOnly(proposal.adjustments),
+            regions: proposal.regions.map(region => ({ ...region, adjustments: lightingOnly(region.adjustments) }))
+                .filter(region => region.adjustments.some(change => change.value !== 0)) };
+    }
+
+    control(key) {
+        return ReviewContract.controls[key] || ReviewContract.detailControls[key];
+    }
+
     targets() {
         const context = this.beforeContext || this.context;
         if (!this.result || !context) return [];
         const state = JSON.parse(context.edits).state;
-        const current = ReviewContract.readAdjustments(state);
+        const current = { ...ReviewContract.readAdjustments(state), clarity: state.clarity };
         const strength = this.strength();
         return this.proposal().adjustments.map(change => {
-            const control = ReviewContract.controls[change.key];
+            const control = ReviewContract.globalControls(this.intensity || 'balanced', this.requestPolicy || {})[change.key];
             const value = current[change.key] + (change.value - current[change.key]) * strength;
             return { ...change, from: current[change.key],
                 value: !strength || change.value === current[change.key] ? current[change.key]
-                    : Number((Math.round(value / control.step) * control.step).toFixed(2)) };
+                    : Math.max(control.min, Math.min(control.max,
+                        Number((Math.round(value / control.step) * control.step).toFixed(2)))) };
         });
     }
 
@@ -1018,14 +1072,14 @@ class ReviewPanel {
         const container = this.elements.adjustments;
         container.replaceChildren();
         if (!this.hasSuggestions() || (this.selection && !this.hasChanges())) {
-            container.append(this.text('p', 'No major lighting or color edit needed.'));
+            container.append(this.text('p', 'No changes in this treatment at the current settings.'));
         } else if (!this.selection) {
             container.append(this.text('p', 'Choose an alternative to inspect its changes. Both start from this same edit; they are never combined.'));
         }
         for (const change of this.targets()) {
             const row = document.createElement('div');
             row.className = 'review-adjustment';
-            row.append(this.text('strong', ReviewContract.controls[change.key].label));
+            row.append(this.text('strong', this.control(change.key).label));
             row.append(this.text('span', `${change.from} to ${change.value}`));
             row.append(this.text('p', change.reason));
             container.append(row);
@@ -1041,7 +1095,7 @@ class ReviewPanel {
                 ? `Center ${Math.round(g.x * 100)}%, ${Math.round(g.y * 100)}%; radii ${Math.round(g.width * 100)}%, ${Math.round(g.height * 100)}%; feather ${Math.round(g.feather * 100)}%.`
                 : `No effect at ${Math.round(g.x * 100)}%, ${Math.round(g.y * 100)}%; full effect at ${Math.round(g.endX * 100)}%, ${Math.round(g.endY * 100)}%.`));
             for (const change of region.adjustments) {
-                row.append(this.text('p', `${ReviewContract.maskControls[change.key].label}: ${change.value > 0 ? '+' : ''}${change.value} — ${change.reason}`));
+                row.append(this.text('p', `${this.control(change.key).label}: ${change.value > 0 ? '+' : ''}${change.value} — ${change.reason}`));
             }
             container.append(row);
         }
@@ -1094,11 +1148,13 @@ class ReviewPanel {
             (switching ? !this.matches(this.appliedContext) && !this.matches(this.beforeContext) : !this.matches(this.context))) return;
         let rollback;
         try {
-            ReviewContract.validateReview(this.result);
+            ReviewContract.validateReview(this.result, this.requestPolicy || {});
             this.app._stopComparison();
             const next = JSON.parse(JSON.stringify(switching ? this.beforeState : this.app.state));
             for (const { key, value } of this.targets()) {
-                if (!Object.hasOwn(ReviewContract.controls, key)) throw new Error('Unsupported review adjustment.');
+                if (!Object.hasOwn(ReviewContract.globalControls(this.intensity || 'balanced', this.requestPolicy || {}), key)) {
+                    throw new Error('Unsupported review adjustment.');
+                }
                 const hsl = /^(hslHue|hslSat|hslLum)_([0-7])$/.exec(key);
                 if (hsl) next[hsl[1]][Number(hsl[2])] = value;
                 else next[key] = value;
@@ -1130,7 +1186,7 @@ class ReviewPanel {
             this.context = null;
             this.appliedContext = this.snapshot();
             this.appliedOptions = { intensity: this.intensity || 'balanced', selection: this.selection,
-                strength: this.elements.strength.value };
+                strength: this.elements.strength.value, includeDetails: this.includeDetails };
             this.app._render();
             this.showAdjustments();
             this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo — no new review. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
@@ -1155,6 +1211,7 @@ class ReviewPanel {
             if (switching && this.appliedOptions) {
                 this.intensity = this.appliedOptions.intensity;
                 this.selection = this.appliedOptions.selection;
+                this.includeDetails = this.appliedOptions.includeDetails;
                 this.elements.alternative.value = this.selection;
                 this.elements.strength.value = this.appliedOptions.strength;
             }

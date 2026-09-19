@@ -1025,6 +1025,7 @@ class App {
 
     _loadFile(file) {
         this._stopComparison();
+        if (this.review) this.review.elements['allow-details'].checked = false;
         this.review?.invalidate('Loading a new photo. Review it once it is ready.');
         // Store original filename for export
         this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
@@ -1190,8 +1191,9 @@ class App {
             for (const [key, val] of Object.entries(mask.adjustments)) {
                 if (typeof mergedAdj[key] === 'number') {
                     mergedAdj[key] = (mergedAdj[key] || 0) + val;
-                    if (mask.blend === 'additive' && ReviewContract.controls[key]) {
-                        const { min, max } = ReviewContract.controls[key];
+                    const control = ReviewContract.controls[key] || ReviewContract.detailControls[key];
+                    if (mask.blend === 'additive' && control) {
+                        const { min, max } = control;
                         mergedAdj[key] = Math.max(min, Math.min(max, mergedAdj[key]));
                     }
                 }

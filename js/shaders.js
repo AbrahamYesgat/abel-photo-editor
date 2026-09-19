@@ -191,7 +191,8 @@ void main() {
         neighbors += texture2D(u_image, v_texCoord + vec2(0.0, -u_texelSize.y)).rgb;
         neighbors += texture2D(u_image, v_texCoord + vec2(0.0, u_texelSize.y)).rgb;
         neighbors *= 0.25;
-        float localContrast = luminance(color) - luminance(neighbors);
+        // Compare source with source, so exposure/color edits do not masquerade as detail.
+        float localContrast = luminance(texColor.rgb) - luminance(neighbors);
         float clarityFactor = u_clarity / 100.0;
         color += localContrast * clarityFactor * 0.8;
         color = clamp(color, 0.0, 1.0);
@@ -329,4 +330,3 @@ void main() {
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), texColor.a);
 }
 `;
-

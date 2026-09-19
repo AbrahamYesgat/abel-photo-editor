@@ -9,7 +9,7 @@ const { once } = require('node:events');
 const { createServer, loadConfig } = require('../server/index.js');
 const { responseSchema } = require('../server/azure.js');
 const { controls, reviewCategories } = require('../js/review-contract.js');
-const { azureSystemInstruction } = require('../server/prompt.js');
+const { azureSystemInstruction, detailInstruction } = require('../server/prompt.js');
 const reviewFixture = require('./helpers/review-fixture.cjs');
 
 const request = () => ({
@@ -117,7 +117,7 @@ test('Azure sends one bounded vision + strict-schema request without temperature
         assert.equal(payload.reasoning_effort, 'low');
         assert.equal(payload.temperature, undefined);
         assert.equal(payload.max_tokens, undefined);
-        assert.equal(payload.messages[0].content, azureSystemInstruction);
+        assert.equal(payload.messages[0].content, azureSystemInstruction + detailInstruction());
         assert.equal(payload.messages[1].content[1].image_url.url, `data:image/jpeg;base64,${request().image}`);
         assert.equal(payload.messages[1].content[1].image_url.detail, 'high');
         assert.equal(payload.response_format.json_schema.strict, true);

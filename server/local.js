@@ -1,8 +1,8 @@
 'use strict';
 
 const { BlockList, isIP } = require('node:net');
-const { reviewSchema, validateReview } = require('../js/review-contract.js');
-const { systemInstruction } = require('./prompt.js');
+const { schemaForRequest, validateReview } = require('../js/review-contract.js');
+const { systemInstruction, detailInstruction, requestData } = require('./prompt.js');
 const { parseJSON } = require('./json.js');
 
 const OLLAMA = 'http://127.0.0.1:11434';
@@ -120,16 +120,16 @@ function createLocalProvider({ config, fetchImpl, SafeError, readUpstream }) {
     async function review(request, controller) {
         await ready(controller);
         const response = await call('/api/chat', {
-            model: config.localModel, stream: true, think: false, format: reviewSchema,
+            model: config.localModel, stream: true, think: false, format: schemaForRequest(request),
             messages: [
-                { role: 'system', content: systemInstruction },
-                { role: 'user', content: JSON.stringify({ adjustments: request.adjustments, intent: request.intent }),
+                { role: 'system', content: systemInstruction + detailInstruction(request) },
+                { role: 'user', content: JSON.stringify(requestData(request)),
                     images: [request.image] }
             ],
             options: { temperature: 0.2, num_ctx: 16384, num_predict: 6144 }
         }, controller);
         try {
-            return validateReview(parseJSON(await readChat(response)));
+            return validateReview(parseJSON(await readChat(response)), request);
         } catch (error) {
             if (error instanceof SafeError) throw error;
             throw new SafeError(502, 'invalid_review', 'The local model returned an incomplete or invalid review. No changes were applied.');

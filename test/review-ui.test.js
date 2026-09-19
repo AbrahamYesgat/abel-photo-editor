@@ -87,6 +87,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
         'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
         'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
+        'allow-details', 'photo-details',
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
@@ -249,6 +250,135 @@ function azureHarness(options) {
     fixture.review.elements.token.value = 'azure-test-token';
     return fixture;
 }
+
+test('clarity opt-in is off on initialization and never stored with connection preferences', async () => {
+    const { review, context, storage } = geminiHarness();
+    assert.equal(review.elements['allow-details'].checked, false);
+    review.elements['allow-details'].checked = true;
+    review.elements['remember-gemini'].checked = true;
+    context.fetch = async () => Response.json(response([]));
+    await review.analyze();
+    assert.equal(JSON.stringify([...storage.values]).includes('allowDetails'), false);
+    const restored = geminiHarness({ storage });
+    assert.equal(restored.review.elements['allow-details'].checked, false);
+});
+
+test('cached detail toggles preserve nonzero baseline clarity and masks, with no calls or stacking', () => {
+    const { app, review, context } = geminiHarness();
+    context.fetch = () => assert.fail('Saved treatment switches never call a provider');
+    app.state.clarity = 20;
+    app.state.sharpenAmount = 19;
+    const mask = app.maskEngine.createMask('radial');
+    mask.adjustments.clarity = -7;
+    app._pushHistory();
+    review.elements['allow-details'].checked = true;
+    review.requestPolicy = review.detailRequest();
+    review.context = review.snapshot();
+    review.result = require('./helpers/detail-fixture.cjs')();
+    review.showResult('adaptive');
+    const baseline = review.snapshot().edits;
+    const historyLength = app.history.length;
+    review.apply();
+    assert.equal(app.state.clarity, 28);
+    assert.equal(app.maskEngine.masks.length, 2);
+    const details = review.snapshot().edits;
+    for (let repeat = 0; repeat < 3; repeat++) {
+        review.elements['photo-details'].dispatch('click');
+        assert.equal(app.state.clarity, 20);
+        assert.equal(app.maskEngine.masks.length, 1, 'detail-only region omitted, not a no-op mask');
+        assert.equal(app.maskEngine.masks[0].adjustments.clarity, -7);
+        assert.equal(app.state.sharpenAmount, 19);
+        assert.equal(review.snapshot().edits, baseline, 'adaptive detail-only recipe off restores baseline exactly');
+        review.elements['photo-details'].dispatch('click');
+        const withoutIds = text => JSON.stringify(JSON.parse(text), (key, value) => key === 'id' ? undefined : value);
+        assert.equal(withoutIds(review.snapshot().edits), withoutIds(details));
+        assert.equal(app.history.length, historyLength + 1);
+    }
+    review.elements.strength.value = '0';
+    review.apply();
+    assert.equal(review.snapshot().edits, baseline);
+    review.elements.strength.value = '50';
+    review.apply();
+    assert.equal(app.state.clarity, 24);
+    assert.equal(app.maskEngine.masks[1].adjustments.clarity, 2);
+    const partial = review.snapshot().edits;
+    app._undo();
+    assert.equal(review.snapshot().edits, baseline);
+    app._redo();
+    assert.equal(review.snapshot().edits, partial);
+    review.selection = 'global';
+    review.apply();
+    review.elements['photo-details'].dispatch('click');
+    assert.equal(app.state.clarity, 20);
+    assert.equal(app.state.exposure, 0.15, 'same lighting treatment stays applied');
+    review.chooseIntensity('expressive');
+    assert.equal(app.state.clarity, 20, 'intensity never silently re-enables detail');
+    app.state.contrast = 1;
+    app._render();
+    assert.equal(review.result, null);
+});
+
+test('browser rejects unsolicited detail and policy changes cancel pending requests before application', async () => {
+    const { app, review, context } = geminiHarness();
+    const detail = require('./helpers/detail-fixture.cjs');
+    context.fetch = async () => Response.json(detail(0));
+    await review.analyze();
+    assert.equal(review.result, null);
+    assert.equal(app.state.clarity, 0);
+    assert.match(review.elements.status.textContent, /Unknown adjustment/);
+    review.elements['allow-details'].checked = true;
+    let finish;
+    context.fetch = (_, options) => {
+        assert.equal(JSON.parse(options.body).detailAdjustments.clarity, 0);
+        return new Promise(resolve => { finish = resolve; });
+    };
+    const pending = review.analyze();
+    review.elements['allow-details'].checked = false;
+    review.elements['allow-details'].dispatch('change');
+    finish(Response.json(detail(0)));
+    await pending;
+    assert.equal(review.result, null);
+    assert.equal(app.state.clarity, 0);
+    assert.equal(app.history.length, 1);
+});
+
+test('interpolated clarity remains inside relative limits even with a fractional manual baseline', () => {
+    const { app, review } = geminiHarness();
+    app.state.clarity = 20.6;
+    review.elements['allow-details'].checked = true;
+    review.requestPolicy = review.detailRequest();
+    review.context = review.snapshot();
+    review.result = require('./helpers/detail-fixture.cjs')(20.6);
+    review.result.variants.refine.adjustments[1].value = 25.6;
+    review.intensity = 'refine';
+    review.showResult('global');
+    review.apply();
+    assert.equal(app.state.clarity, 25.6, 'step rounding must not exceed +5');
+});
+
+test('manual detail import is bound to exported policy and baseline, including smart quotes', async () => {
+    const { app, review } = manualHarness();
+    const detail = require('./helpers/detail-fixture.cjs');
+    app.state.clarity = 20;
+    await review.exportManual();
+    review.elements.paste.value = JSON.stringify(detail());
+    review.importManual();
+    assert.equal(review.result, null);
+    review.elements['allow-details'].checked = true;
+    review.importManual();
+    assert.equal(review.result, null, 'changing permission cannot bless an old export');
+    await review.exportManual();
+    review.elements.paste.value = JSON.stringify(detail()).replace(/"([^"]*)"/g, '“$1”');
+    review.importManual(true);
+    assert.ok(review.result);
+    review.selection = 'global';
+    review.apply();
+    assert.equal(app.state.clarity, 28);
+    review.includeDetails = false;
+    review.apply();
+    assert.equal(app.state.clarity, 20);
+    assert.equal(app.state.exposure, 0.3);
+});
 
 test('Azure public endpoint default contains no token and never grants consent or probes', () => {
     const { review, context, document } = harness({ initialize: true });
@@ -695,7 +825,7 @@ test('intent-first review renders new sections safely and shows genuine no-chang
     assert.ok(feedback.includes('Borderline'));
     assert.ok(feedback.includes('No major issue identified.'));
     for (const name of ReviewContract.reviewCategories) assert.ok(feedback.includes(`${name}  7.0/10`));
-    assert.ok(textOf(review.elements.adjustments).includes('No major lighting or color edit needed.'));
+    assert.ok(textOf(review.elements.adjustments).includes('No changes in this treatment at the current settings.'));
     assert.equal(review.elements['apply-bar'].hidden, false);
 });
 
@@ -1028,7 +1158,7 @@ test('cloud and local reviews use separate endpoints and credentials with identi
         assert.equal(requests[0].headers.Authorization, `Bearer ${provider === 'local' ? 'local' : 'cloud'}-test-token`);
         assert.equal(requests[0].redirect, 'error');
         assert.equal(requests[0].credentials, 'omit');
-        assert.deepEqual(Object.keys(JSON.parse(requests[0].body)).sort(), ['adjustments', 'image', 'intent']);
+        assert.deepEqual(Object.keys(JSON.parse(requests[0].body)).sort(), ['adjustments', 'allowDetails', 'image', 'intent']);
         const image = app.image;
         review.selection = 'global';
         review.apply();
@@ -1194,7 +1324,7 @@ test('only successful validated local reviews persist; cloud credentials and req
             context.ReviewContract = { ...ReviewContract, validateRequest() {} };
             context.fetch = async (url, options) => {
                 assert.equal(options.headers.Authorization, `Bearer ${provider === 'local' ? savedLocal.token : 'synthetic-cloud-token'}`);
-                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'image', 'intent']);
+                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowDetails', 'image', 'intent']);
                 assert.ok(!options.body.includes('token'));
                 return Response.json(valid ? response([]) : { error: 'Malformed review' });
             };

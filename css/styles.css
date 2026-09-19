@@ -1714,6 +1714,7 @@ html, body {
     cursor: pointer;
 }
 .review-intensities button { flex: 1; }
+.review-intensities button[hidden] { display: none; }
 .review-intensities button[aria-pressed="true"] { background: #494191; border-color: #aca3ff; }
 .review-photo-controls :focus-visible { outline: 2px solid #c6c0ff; outline-offset: 1px; }
 .review-photo-options input { min-width: 40px; width: 100%; height: 44px; accent-color: #a49aff; }
