@@ -67,7 +67,25 @@ test('localization specifies image-grounded extents, radii conversion, gradient 
     const { geminiSystemInstruction } = require('../server/prompt.js');
     assert.ok(geminiSystemInstruction.startsWith(systemInstruction));
     assert.match(geminiSystemInstruction, /GEMINI DETAILED IMAGE AUDIT/);
-    assert.match(geminiSystemInstruction, /two or three focused sentences/);
+    assert.match(geminiSystemInstruction, /one or two compact sentences/);
     assert.match(geminiSystemInstruction, /more thorough in diagnosis, not more aggressive/);
     assert.ok(!systemInstruction.includes('GEMINI DETAILED IMAGE AUDIT'), 'local context does not grow by the Gemini-only audit');
+});
+
+test('intent calibration distinguishes evidence, expressive choices and actual photographic failure', () => {
+    for (const rule of ['conscious decision is an inference', 'two readings are plausible',
+        'EVIDENCE REQUIRED FOR A DEDUCTION', 'material adverse effect',
+        'An alternative aesthetic', 'do not rationalize every visible problem',
+        'A blurred figure can communicate movement', 'intentional camera movement',
+        'Dominance is not itself distraction', 'narrative punctuation',
+        'level their role requires', 'Uncertainty is not evidence of a defect',
+        'Fine technical quality cannot be judged reliably',
+        'NOT the arithmetic mean', 'Do not repeatedly deduct',
+        'Minor technical or tonal imperfections do not automatically',
+        'Separate grading from edit design']) {
+        assert.ok(critiqueRubric.includes(rule), rule);
+    }
+    for (const name of ['systemInstruction', 'geminiSystemInstruction', 'azureSystemInstruction']) {
+        assert.ok(require('../server/prompt.js')[name].includes(critiqueRubric), name);
+    }
 });
