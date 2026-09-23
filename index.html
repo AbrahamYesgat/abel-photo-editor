@@ -9,7 +9,7 @@
     <meta name="abel-azure-review-endpoint" content="https://abel-review-66c1d915.azurewebsites.net">
     <title>ABEL — Photo Editor</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/styles.css?v=intensities-1">
+    <link rel="stylesheet" href="css/styles.css?v=single-canvas-1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L3 22h18L12 2z' fill='%236366f1'/><path d='M12 8l-4.5 10h9L12 8z' fill='%23818cf8'/></svg>">
@@ -105,8 +105,10 @@
                     <button type="button" data-intensity="refine" aria-pressed="false">Refine</button>
                     <button type="button" data-intensity="balanced" aria-pressed="false">Balanced</button>
                     <button type="button" data-intensity="expressive" aria-pressed="false">Expressive</button>
-                    <button id="review-photo-details" type="button" aria-pressed="false" aria-label="Include AI clarity in this saved treatment" title="Off keeps the same lighting/color treatment and your original clarity. No new AI call." hidden>Details</button>
                 </div>
+                <details class="review-photo-more">
+                    <summary aria-label="More saved edit controls" title="Mode, strength, details and review">⋯</summary>
+                    <div class="review-photo-expanded">
                 <div class="review-photo-options">
                     <select id="review-photo-mode" aria-label="Apply saved AI mode">
                         <option value="global">Global</option>
@@ -116,7 +118,10 @@
                     <output id="review-photo-strength-value">100%</output>
                     <button id="review-open-drawer" type="button">Review</button>
                 </div>
+                <button id="review-photo-details" type="button" aria-pressed="false" aria-label="Include AI clarity in this saved treatment" title="Off keeps the same lighting/color treatment and your original clarity. No new AI call." hidden>Details</button>
                 <span id="review-photo-state" class="review-photo-state" role="status"></span>
+                    </div>
+                </details>
             </div>
 
             <div class="drop-zone" id="drop-zone" style="cursor:pointer;">
@@ -497,19 +502,19 @@
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="js/shaders.js"></script>
-<script src="js/gl-engine.js"></script>
+<script src="js/shaders.js?v=single-canvas-1"></script>
+<script src="js/gl-engine.js?v=single-canvas-1"></script>
 <script src="js/histogram.js"></script>
 <script src="js/curve-editor.js"></script>
-<script src="js/mask-engine.js"></script>
+<script src="js/mask-engine.js?v=single-canvas-1"></script>
 <script src="js/auto-edit.js"></script>
 <script src="js/presets.js"></script>
 <script src="js/review-contract.js?v=intensities-1"></script>
 <script src="js/review-prompt.js?v=intensities-1"></script>
 <script src="js/review-json.js"></script>
 <script src="js/review-manual.js?v=intensities-1"></script>
-<script src="js/review.js?v=intensities-1"></script>
-<script src="js/app.js?v=intensities-1"></script>
+<script src="js/review.js?v=single-canvas-1"></script>
+<script src="js/app.js?v=single-canvas-1"></script>
 
 <script>
     document.getElementById('export-quality').addEventListener('input', function() {

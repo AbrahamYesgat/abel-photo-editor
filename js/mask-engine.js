@@ -22,6 +22,14 @@ class MaskEngine {
     }
 
     touch(mask) {
+        if (mask.sharedPixels) {
+            const canvas = document.createElement('canvas');
+            canvas.width = mask.canvas.width; canvas.height = mask.canvas.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(mask.canvas, 0, 0);
+            mask.canvas = canvas; mask.ctx = ctx;
+            mask.sharedPixels = false;
+        }
         mask.revision = (mask.revision || 0) + 1;
     }
 
@@ -43,10 +51,13 @@ class MaskEngine {
         return this.masks.map((mask, i) => {
             let cached = this._snapshots.get(mask);
             if (!cached || cached.revision !== descriptions[i].revision) {
-                const canvas = document.createElement('canvas');
-                canvas.width = mask.canvas.width;
-                canvas.height = mask.canvas.height;
-                canvas.getContext('2d').drawImage(mask.canvas, 0, 0);
+                let canvas = mask.canvas;
+                if (!mask.sharedPixels) {
+                    canvas = document.createElement('canvas');
+                    canvas.width = mask.canvas.width;
+                    canvas.height = mask.canvas.height;
+                    canvas.getContext('2d').drawImage(mask.canvas, 0, 0);
+                }
                 cached = { revision: descriptions[i].revision, canvas };
                 this._snapshots.set(mask, cached);
             }
@@ -55,15 +66,17 @@ class MaskEngine {
         });
     }
 
-    restoreMasks(snapshots) {
+    restoreMasks(snapshots, sharePixels = false) {
         this.masks = snapshots.map(saved => {
             const { canvas: source, ...metadata } = saved;
-            const canvas = document.createElement('canvas');
-            canvas.width = source.width;
-            canvas.height = source.height;
+            const canvas = sharePixels ? source : document.createElement('canvas');
+            if (!sharePixels) {
+                canvas.width = source.width;
+                canvas.height = source.height;
+            }
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(source, 0, 0);
-            const mask = { ...JSON.parse(JSON.stringify(metadata)), canvas, ctx };
+            if (!sharePixels) ctx.drawImage(source, 0, 0);
+            const mask = { ...JSON.parse(JSON.stringify(metadata)), canvas, ctx, sharedPixels: sharePixels };
             this._snapshots.set(mask, { revision: mask.revision, canvas: source });
             return mask;
         });
@@ -75,18 +88,34 @@ class MaskEngine {
         // Stage on a separate engine: a failed allocation cannot partially change the edit.
         const staging = new MaskEngine(this.app);
         staging._nextMaskId = this._nextMaskId;
+        const geometryCache = new Map();
         for (const region of regions) {
             const g = region.geometry;
-            const mask = staging.createMask(g.type);
+            const key = JSON.stringify([this.app.imageWidth, this.app.imageHeight, g]);
+            const cached = this._reviewGeometry?.get(key);
+            let mask;
+            if (cached) {
+                mask = { ...cached, id: ++staging._nextMaskId, adjustments: this._defaultMaskAdjustments(),
+                    ctx: cached.canvas.getContext('2d') };
+                staging.masks.push(mask);
+            } else {
+                mask = staging.createMask(g.type);
+            }
             if (!mask) throw new Error('No photo available for adaptive masks.');
             const w = mask.canvas.width, h = mask.canvas.height;
-            if (g.type === 'radial') staging.createRadialMask(g.x * w, g.y * h, g.width * w, g.height * h, g.feather * 100);
-            else staging.createLinearMask(g.x * w, g.y * h, g.endX * w, g.endY * h, true);
+            if (!cached) {
+                if (g.type === 'radial') staging.createRadialMask(g.x * w, g.y * h, g.width * w, g.height * h, g.feather * 100);
+                else staging.createLinearMask(g.x * w, g.y * h, g.endX * w, g.endY * h, true);
+            }
+            mask.sharedPixels = true;
+            geometryCache.set(key, { type: mask.type, canvas: mask.canvas, params: mask.params,
+                revision: mask.revision, visible: true, inverted: false, sharedPixels: true });
             mask.name = region.name;
             mask.reason = region.reason;
             mask.blend = 'additive';
             for (const change of region.adjustments) mask.adjustments[change.key] = change.value;
         }
+        this._reviewGeometry = geometryCache;
         this._nextMaskId = staging._nextMaskId;
         return staging.masks;
     }
@@ -97,12 +126,12 @@ class MaskEngine {
         if (!w || !h) return null;
 
         // Cap mask canvas for performance on huge images
-        const maxDim = 4096;
+        const maxDim = 2048;
         let mw = w, mh = h;
         if (mw > maxDim || mh > maxDim) {
             const s = maxDim / Math.max(mw, mh);
-            mw = Math.round(mw * s);
-            mh = Math.round(mh * s);
+            mw = Math.max(1, Math.round(mw * s));
+            mh = Math.max(1, Math.round(mh * s));
         }
 
         const canvas = document.createElement('canvas');
@@ -176,7 +205,7 @@ class MaskEngine {
     _brushStroke(mask, x, y) {
         this.touch(mask);
         const ctx = mask.ctx;
-        const size = this.brushSize;
+        const size = this.brushSize * mask.canvas.width / this.app.imageWidth;
         const feather = this.brushFeather / 100;
         const flow = this.brushFlow / 100;
 
@@ -522,11 +551,14 @@ class MaskEngine {
         const mask = this.getActiveMask();
         if (!mask) return null;
 
-        const overlay = document.createElement('canvas');
-        overlay.width = displayWidth;
-        overlay.height = displayHeight;
-        const ctx = overlay.getContext('2d');
+        const key = `${mask.id}:${mask.revision}:${mask.inverted}:${displayWidth}:${displayHeight}`;
+        if (this._overlayKey === key && this._overlayMask === mask.canvas) return this._overlayCanvas;
+        const overlay = this._overlayCanvas ||= document.createElement('canvas');
+        if (overlay.width !== displayWidth) overlay.width = displayWidth;
+        if (overlay.height !== displayHeight) overlay.height = displayHeight;
+        const ctx = overlay.getContext('2d', { willReadFrequently: true });
 
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
         ctx.drawImage(mask.canvas, 0, 0, displayWidth, displayHeight);
 
         // Colorize: show red tint for selected areas
@@ -540,6 +572,8 @@ class MaskEngine {
             d[i + 3] = val * 0.3; // A
         }
         ctx.putImageData(imgData, 0, 0);
+        this._overlayKey = key;
+        this._overlayMask = mask.canvas;
         return overlay;
     }
 }

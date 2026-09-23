@@ -215,7 +215,8 @@ class App {
         } else {
             this.state[key] = value;
         }
-        this._render();
+        this.review?.onRender();
+        this._requestRender();
         this._debouncedHistoryPush();
     }
 
@@ -594,8 +595,7 @@ class App {
                 document.getElementById('brush-settings').style.display = mask.type === 'brush' ? 'block' : 'none';
                 document.getElementById('wand-settings').style.display = mask.type === 'wand' ? 'block' : 'none';
                 document.getElementById('canvas-container').classList.add('mask-mode');
-                if (this.showMaskOverlay) this._renderMaskOverlay();
-                this._render();
+                this._requestRender(true);
             });
             list.appendChild(item);
         });
@@ -821,6 +821,8 @@ class App {
 
         // Window resize
         window.addEventListener('resize', () => this._fitCanvas());
+        this._canvasResizeObserver = new ResizeObserver(() => this._fitCanvas());
+        this._canvasResizeObserver.observe(document.getElementById('canvas-container'));
     }
 
     _bindHoldCompare(element, delayed = false, preferReview = false) {
@@ -977,6 +979,8 @@ class App {
             if (this.showMaskOverlay) this._renderMaskOverlay();
             this._render();
             this._pushHistory();
+        } else {
+            this._requestRender(true);
         }
     }
 
@@ -985,8 +989,7 @@ class App {
         const pos = this._canvasToImage(e);
         this.maskEngine.handlePointerMove(pos.canvasX, pos.canvasY, pos.imgX, pos.imgY);
         if (this.maskEngine.isDrawing || this.maskEngine._creating) {
-            if (this.showMaskOverlay) this._renderMaskOverlay();
-            this._render();
+            this._requestRender(true);
         }
 
         // Update brush cursor
@@ -1086,6 +1089,9 @@ class App {
         canvas.style.minHeight = h + 'px';
         canvas.style.maxWidth = w + 'px';
         canvas.style.maxHeight = h + 'px';
+        const maskOverlay = document.getElementById('mask-overlay');
+        maskOverlay.style.width = w + 'px';
+        maskOverlay.style.height = h + 'px';
     }
 
     _initResizeHandle() {
@@ -1140,161 +1146,51 @@ class App {
 
     // ======================== Render ========================
 
-    _render() {
+    _requestRender(maskOverlay = false) {
+        this._pendingMaskOverlay ||= maskOverlay;
+        clearTimeout(this._previewSettleTimer);
+        this._previewSettleTimer = setTimeout(() => this._render(), 250);
+        if (this._renderFrame) return;
+        this._renderFrame = requestAnimationFrame(() => {
+            this._renderFrame = null;
+            this._render(true);
+            if (this._pendingMaskOverlay && this.showMaskOverlay) this._renderMaskOverlay();
+            this._pendingMaskOverlay = false;
+        });
+    }
+
+    _render(interactive = false) {
         if (!this.image || !this.glEngine) return;
+        if (this._renderFrame) cancelAnimationFrame(this._renderFrame);
+        this._renderFrame = null;
+        if (!interactive) {
+            clearTimeout(this._previewSettleTimer);
+            this._previewSettleTimer = null;
+        }
+        const engine = this.glEngine;
+        const scale = interactive ? Math.min(1, 640 / Math.max(engine.previewWidth, engine.previewHeight)) : 1;
+        engine.setRenderSize(Math.max(1, Math.round(engine.previewWidth * scale)),
+            Math.max(1, Math.round(engine.previewHeight * scale)));
         this.review?.onRender();
-
         const adj = { ...(this._comparisonState || this.state), showOriginal: this.showingOriginal };
-        const lut = this.curveEditor.getLUT();
-        this.glEngine.updateCurveLUT(lut);
-
-        // Collect masks with non-zero adjustments
+        this.glEngine.updateCurveLUT(this.curveEditor.getLUT());
         const masksWithAdj = (this._comparisonMasks || this.maskEngine.masks).filter(m =>
             m.visible && Object.values(m.adjustments).some(v => v !== 0)
         );
-
-        // Step 1: Render base image (global adjustments only)
-        this.glEngine.setAdjustments(adj);
-        this.glEngine.render();
-
-        // If showing original, hide overlay and skip mask compositing
-        if (this.showingOriginal) {
-            this._hideCompositeOverlay();
-            this._scheduleHistogramUpdate();
-            return;
-        }
-
-        if (masksWithAdj.length === 0) {
-            this._hideCompositeOverlay();
-            this._scheduleHistogramUpdate();
-            return;
-        }
-
-        // Step 2: Composite masks via 2D canvas
-        const glCanvas = document.getElementById('main-canvas');
-        const rw = glCanvas.width;
-        const rh = glCanvas.height;
-
-        // Read base render into result canvas
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = rw;
-        resultCanvas.height = rh;
-        const rCtx = resultCanvas.getContext('2d');
-        rCtx.drawImage(glCanvas, 0, 0);
-        const baseData = masksWithAdj.some(mask => mask.blend === 'additive')
-            ? rCtx.getImageData(0, 0, rw, rh).data : null;
-
-        // For each mask: render with global+mask adjustments merged, then composite
-        for (const mask of masksWithAdj) {
-            // Merge global + mask adjustments
-            const mergedAdj = { ...adj };
-            for (const [key, val] of Object.entries(mask.adjustments)) {
-                if (typeof mergedAdj[key] === 'number') {
-                    mergedAdj[key] = (mergedAdj[key] || 0) + val;
-                    const control = ReviewContract.controls[key] || ReviewContract.detailControls[key];
-                    if (mask.blend === 'additive' && control) {
-                        const { min, max } = control;
-                        mergedAdj[key] = Math.max(min, Math.min(max, mergedAdj[key]));
-                    }
-                }
-            }
-            mergedAdj.showOriginal = false;
-
-            // Render with merged adjustments
-            this.glEngine.setAdjustments(mergedAdj);
-            this.glEngine.render();
-
-            // Get mask selection scaled to render size
-            const maskSrc = mask.inverted ? this._invertMaskCanvas(mask.canvas) : mask.canvas;
-            const maskScaled = document.createElement('canvas');
-            maskScaled.width = rw;
-            maskScaled.height = rh;
-            const mCtx = maskScaled.getContext('2d');
-            mCtx.drawImage(maskSrc, 0, 0, rw, rh);
-
-            // Create masked version: draw adjusted image, then set alpha from mask
-            const layerCanvas = document.createElement('canvas');
-            layerCanvas.width = rw;
-            layerCanvas.height = rh;
-            const lCtx = layerCanvas.getContext('2d');
-            lCtx.drawImage(glCanvas, 0, 0);
-
-            const layerData = lCtx.getImageData(0, 0, rw, rh);
-            const maskData = mCtx.getImageData(0, 0, rw, rh).data;
-            const ld = layerData.data;
-            if (mask.blend === 'additive') {
-                // Add only this region's rendered difference; don't replace earlier masks.
-                const composite = rCtx.getImageData(0, 0, rw, rh);
-                for (let i = 0; i < rw * rh; i++) {
-                    const weight = maskData[i * 4] / 255;
-                    for (let c = 0; c < 3; c++) {
-                        const index = i * 4 + c;
-                        composite.data[index] += (ld[index] - baseData[index]) * weight;
-                    }
-                }
-                rCtx.putImageData(composite, 0, 0);
-                continue;
-            }
-            for (let i = 0; i < rw * rh; i++) {
-                ld[i * 4 + 3] = maskData[i * 4]; // mask R channel → alpha
-            }
-            lCtx.putImageData(layerData, 0, 0);
-
-            // Composite onto result
-            rCtx.drawImage(layerCanvas, 0, 0);
-        }
-
-        // Restore global adjustments for the visible GL canvas
-        this.glEngine.setAdjustments(adj);
-        this.glEngine.render();
-
-        // Show composite overlay
-        this._compositeToDisplay(resultCanvas);
+        this.glEngine.renderComposite(adj, masksWithAdj);
         this._scheduleHistogramUpdate();
     }
 
-    _compositeToDisplay(resultCanvas) {
-        let overlay = document.getElementById('composite-overlay');
-        if (!overlay) {
-            overlay = document.createElement('canvas');
-            overlay.id = 'composite-overlay';
-            overlay.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;';
-            document.getElementById('canvas-container').appendChild(overlay);
-        }
-        const glCanvas = document.getElementById('main-canvas');
-        overlay.width = resultCanvas.width;
-        overlay.height = resultCanvas.height;
-        overlay.style.width = glCanvas.style.width;
-        overlay.style.height = glCanvas.style.height;
-        overlay.style.display = 'block';
-        const ctx = overlay.getContext('2d');
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-        ctx.drawImage(resultCanvas, 0, 0);
-    }
-
     _hideCompositeOverlay() {
+        // Remove any legacy overlay retained by an older session.
         const overlay = document.getElementById('composite-overlay');
-        if (overlay) overlay.style.display = 'none';
+        if (overlay) overlay.remove();
     }
 
     _renderedCanvas() {
-        const composite = document.getElementById('composite-overlay');
-        return composite && composite.style.display !== 'none'
-            ? composite : document.getElementById('main-canvas');
-    }
-
-    _invertMaskCanvas(canvas) {
-        const w = canvas.width, h = canvas.height;
-        const tmp = document.createElement('canvas');
-        tmp.width = w;
-        tmp.height = h;
-        const ctx = tmp.getContext('2d');
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'difference';
-        ctx.drawImage(canvas, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-        return tmp;
+        if (this.review?._applyFrame) this.review.apply();
+        if (this._renderFrame || this._previewSettleTimer) this._render();
+        return document.getElementById('main-canvas');
     }
 
     _histogramTimer = null;
@@ -1312,7 +1208,7 @@ class App {
                 tmp.width = sw;
                 tmp.height = sh;
                 const ctx = tmp.getContext('2d');
-                ctx.drawImage(this._renderedCanvas(), 0, 0, sw, sh);
+                ctx.drawImage(this.glEngine.canvas, 0, 0, sw, sh);
                 const imgData = ctx.getImageData(0, 0, sw, sh);
                 this.histogram.update(imgData);
             } catch (e) { /* ignore */ }
@@ -1327,11 +1223,14 @@ class App {
 
         const canvas = document.getElementById('main-canvas');
         const rect = canvas.getBoundingClientRect();
-        const maskOverlay = this.maskEngine.getMaskOverlay(Math.round(rect.width), Math.round(rect.height));
+        const scale = Math.min(1, 640 / Math.max(rect.width, rect.height));
+        const width = Math.max(1, Math.round(rect.width * scale));
+        const height = Math.max(1, Math.round(rect.height * scale));
+        const maskOverlay = this.maskEngine.getMaskOverlay(width, height);
         if (maskOverlay) {
             const ctx = overlay.getContext('2d');
-            overlay.width = rect.width;
-            overlay.height = rect.height;
+            if (overlay.width !== width) overlay.width = width;
+            if (overlay.height !== height) overlay.height = height;
             overlay.style.display = 'block';
             ctx.clearRect(0, 0, overlay.width, overlay.height);
             ctx.drawImage(maskOverlay, 0, 0);
@@ -1352,8 +1251,12 @@ class App {
         this.history.push(snap);
         this.historyIndex = this.history.length - 1;
 
-        // Limit history
-        if (this.history.length > 100) {
+        // Count shared pixel snapshots once; a brush stroke must not retain gigabytes.
+        const historyBytes = () => {
+            const canvases = new Set(this.history.flatMap(entry => entry.masks.map(mask => mask.canvas)));
+            return [...canvases].reduce((bytes, canvas) => bytes + canvas.width * canvas.height * 4, 0);
+        };
+        while (this.history.length > 100 || (this.history.length > 2 && historyBytes() > 72 * 1024 * 1024)) {
             this.history.shift();
             this.historyIndex--;
             if (this._preCropImage) this._preCropHistoryIndex = Math.max(0, this._preCropHistoryIndex - 1);
@@ -1748,8 +1651,23 @@ class App {
         }
     }
 
+    _exportCanvas(scale = 1) {
+        const engine = this.glEngine;
+        const masks = this.maskEngine.masks.filter(mask =>
+            mask.visible && Object.values(mask.adjustments).some(value => value !== 0));
+        try {
+            engine.updateCurveLUT(this.curveEditor.getLUT());
+            return engine.exportImage(this.image, { ...this.state, showOriginal: false }, masks, scale);
+        } finally {
+            // Export never leaves a partial tile or a resized composite on the photo.
+            engine.loadImage(this.image);
+            this._render();
+        }
+    }
+
     _doExport() {
         if (this._exporting) return;
+        if (this.review?._applyFrame) this.review.apply();
         this._stopComparison();
         this._exporting = true;
         const btn = document.getElementById('export-confirm');
@@ -1780,22 +1698,19 @@ class App {
         if (isAI) {
             // AI super-resolution export
             this._aiUpscaleExport(scale, mimeType, quality, onBlob, btn);
-        } else if (scale === 1) {
-            this._render();
-            this._renderedCanvas().toBlob(onBlob, mimeType, quality);
         } else {
-            this._render();
-            const srcCanvas = this._renderedCanvas();
-            const outW = Math.round(this.imageWidth * scale);
-            const outH = Math.round(this.imageHeight * scale);
-            const outCanvas = document.createElement('canvas');
-            outCanvas.width = outW;
-            outCanvas.height = outH;
-            const ctx = outCanvas.getContext('2d');
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(srcCanvas, 0, 0, outW, outH);
-            outCanvas.toBlob(onBlob, mimeType, quality);
+            try {
+                const output = this._exportCanvas(scale);
+                output.toBlob(blob => {
+                    output.width = output.height = 1;
+                    onBlob(blob);
+                }, mimeType, quality);
+            } catch (error) {
+                this._exporting = false;
+                btn.disabled = false;
+                btn.textContent = 'Download';
+                alert(`Export failed: ${error.message}`);
+            }
         }
     }
 
@@ -1923,18 +1838,15 @@ class App {
             const msg = (e && e.message) ? e.message : String(e);
             alert('AI upscaling failed: ' + msg + '\nFalling back to bicubic. Check browser console for details.');
             this._stopComparison();
-            this._render();
-            const srcCanvas = this._renderedCanvas();
-            const outW = Math.round(this.imageWidth * scale);
-            const outH = Math.round(this.imageHeight * scale);
-            const outCanvas = document.createElement('canvas');
-            outCanvas.width = outW;
-            outCanvas.height = outH;
-            const ctx = outCanvas.getContext('2d');
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(srcCanvas, 0, 0, outW, outH);
-            outCanvas.toBlob(onBlob, mimeType, quality);
+            try {
+                const output = this._exportCanvas(scale);
+                output.toBlob(blob => {
+                    output.width = output.height = 1;
+                    onBlob(blob);
+                }, mimeType, quality);
+            } catch (error) {
+                onBlob(null);
+            }
         }
     }
 
@@ -3264,10 +3176,9 @@ class BatchProcessor {
                             }
                         }
                         batchGL.updateCurveLUT({ data: lutData, width: 256, height: 4, isIdentity: true });
-                        batchGL.render();
-
-                        // Export
-                        offCanvas.toBlob((blob) => {
+                        const output = batchGL.exportImage(img, adj);
+                        output.toBlob((blob) => {
+                            output.width = output.height = 1;
                             if (blob) resolve(blob);
                             else reject(new Error('toBlob failed'));
                         }, mimeType, quality);

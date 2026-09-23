@@ -5,10 +5,11 @@ const VERTEX_SHADER = `
 attribute vec2 a_position;
 attribute vec2 a_texCoord;
 varying vec2 v_texCoord;
+uniform vec4 u_region;
 
 void main() {
     gl_Position = vec4(a_position, 0.0, 1.0);
-    v_texCoord = a_texCoord;
+    v_texCoord = u_region.xy + a_texCoord * u_region.zw;
 }
 `;
 
@@ -21,6 +22,7 @@ uniform sampler2D u_image;
 uniform sampler2D u_curveLUT;
 uniform vec2 u_resolution;
 uniform vec2 u_texelSize;
+uniform vec4 u_sourceRegion;
 
 // Basic adjustments
 uniform float u_exposure;
@@ -63,6 +65,9 @@ uniform int u_useCurve;
 uniform int u_showOriginal;
 
 // ======== Color space helpers ========
+vec4 sampleImage(vec2 uv) {
+    return texture2D(u_image, (uv - u_sourceRegion.xy) / u_sourceRegion.zw);
+}
 
 float luminance(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -130,7 +135,7 @@ float rand(vec2 co) {
 
 // ======== Main ========
 void main() {
-    vec4 texColor = texture2D(u_image, v_texCoord);
+    vec4 texColor = sampleImage(v_texCoord);
     vec3 color = texColor.rgb;
     vec3 original = color;
 
@@ -186,10 +191,10 @@ void main() {
     // ---- 6. Clarity (simplified local contrast) ----
     if (u_clarity != 0.0) {
         vec3 neighbors = vec3(0.0);
-        neighbors += texture2D(u_image, v_texCoord + vec2(-u_texelSize.x, 0.0)).rgb;
-        neighbors += texture2D(u_image, v_texCoord + vec2(u_texelSize.x, 0.0)).rgb;
-        neighbors += texture2D(u_image, v_texCoord + vec2(0.0, -u_texelSize.y)).rgb;
-        neighbors += texture2D(u_image, v_texCoord + vec2(0.0, u_texelSize.y)).rgb;
+        neighbors += sampleImage(v_texCoord + vec2(-u_texelSize.x, 0.0)).rgb;
+        neighbors += sampleImage(v_texCoord + vec2(u_texelSize.x, 0.0)).rgb;
+        neighbors += sampleImage(v_texCoord + vec2(0.0, -u_texelSize.y)).rgb;
+        neighbors += sampleImage(v_texCoord + vec2(0.0, u_texelSize.y)).rgb;
         neighbors *= 0.25;
         // Compare source with source, so exposure/color edits do not masquerade as detail.
         float localContrast = luminance(texColor.rgb) - luminance(neighbors);
@@ -294,14 +299,14 @@ void main() {
     if (u_sharpenAmount > 0.0) {
         vec3 blur = vec3(0.0);
         float s = 1.0;
-        blur += texture2D(u_image, v_texCoord + vec2(-u_texelSize.x * s, 0.0)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(u_texelSize.x * s, 0.0)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(0.0, -u_texelSize.y * s)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(0.0, u_texelSize.y * s)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(-u_texelSize.x * s, -u_texelSize.y * s)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(u_texelSize.x * s, -u_texelSize.y * s)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(-u_texelSize.x * s, u_texelSize.y * s)).rgb;
-        blur += texture2D(u_image, v_texCoord + vec2(u_texelSize.x * s, u_texelSize.y * s)).rgb;
+        blur += sampleImage(v_texCoord + vec2(-u_texelSize.x * s, 0.0)).rgb;
+        blur += sampleImage(v_texCoord + vec2(u_texelSize.x * s, 0.0)).rgb;
+        blur += sampleImage(v_texCoord + vec2(0.0, -u_texelSize.y * s)).rgb;
+        blur += sampleImage(v_texCoord + vec2(0.0, u_texelSize.y * s)).rgb;
+        blur += sampleImage(v_texCoord + vec2(-u_texelSize.x * s, -u_texelSize.y * s)).rgb;
+        blur += sampleImage(v_texCoord + vec2(u_texelSize.x * s, -u_texelSize.y * s)).rgb;
+        blur += sampleImage(v_texCoord + vec2(-u_texelSize.x * s, u_texelSize.y * s)).rgb;
+        blur += sampleImage(v_texCoord + vec2(u_texelSize.x * s, u_texelSize.y * s)).rgb;
         blur /= 8.0;
         float sharpStr = u_sharpenAmount / 100.0 * 2.0;
         color += (color - blur) * sharpStr;

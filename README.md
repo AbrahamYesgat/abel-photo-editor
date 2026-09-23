@@ -12,11 +12,33 @@ Every review produces **Refine**, **Balanced** (default), and **Expressive**, ea
 
 All three protect artistic choices such as fog, haze, silhouettes and muted color; empty or identical recipes remain valid when changes are unwarranted. No intensity applies cropping, content manipulation, curves or destructive edits.
 
-Choose an intensity before Review & apply, or inspect the saved suggestions before Apply in review-only/local/manual workflows. After application, tap **Refine | Balanced | Expressive** beside the photo. On mobile, **View photo · switch intensities** dismisses the drawer; **Review** brings it back. The photo controls also switch Global/Adaptive and strength. These actions make **no new model requests**. Hold the photo to compare against the same complete pre-review baseline and release to return; the intensity buttons never start comparison.
+Choose an intensity before Review & apply, or inspect the saved suggestions before Apply in review-only/local/manual workflows. After application, tap **Refine | Balanced | Expressive** in the compact, translucent pill at the bottom of the photo. **⋯** opens Global/Adaptive, strength, optional Details, and Review without opening the main drawer. On mobile, **View photo · switch intensities** dismisses the drawer; **⋯ → Review** brings it back. All controls retain 44px touch targets and keyboard access. These actions make **no new model requests**. Hold the photo to compare against the same complete pre-review baseline and release to return; the intensity buttons never start comparison.
 
 Switching replaces one AI history transaction, never stacks edits. Each choice starts from the frozen reviewed state and original masks; only that choice's new masks are added. **Undo restores the baseline; Redo restores the latest choice**, without flooding history. A no-change/0% selection retains a reversible baseline transaction so other saved choices remain available. Manual edits, mask modifications, a new source, an applied crop, changed intent/connection or provider clear the saved alternatives rather than overwrite your work. Already-applied edits remain. Alternatives live only in this tab's memory, not browser storage; reload needs another review.
 
 The response shape now requires `variants: {refine, balanced, expressive}`. Old two-recipe responses are deliberately rejected with an update/re-export instruction, never expanded into invented intensities. Update/restart the backend with the frontend, then refresh open tabs and re-export older manual prompts.
+
+## Photo preview, masks and export
+
+The photo is displayed by **one canvas**. Global adjustments and local masks are composed into offscreen GPU buffers; only the finished result reaches the display. Drawer transitions and resizing cannot leave a smaller edited canvas floating over a larger original.
+
+Preview textures are sized for the viewport, up to 1600px on the long edge. Slider/brush updates are coalesced to animation frames and temporarily render at up to 640px while interacting; the sharper preview returns after 250ms idle. The photo stays visible throughout. Adjusted layers, unchanged selection textures and preceding masks are reused; the slider path performs no full-image CPU pixel readbacks. Red selection overlays are also display-sized and reused. Mask selections retain up to 2048px of precision, with brush coordinates/cursors scaled consistently.
+
+History shares unchanged selection pixels. Unique mask snapshots have a 72 MiB budget (while retaining at least the current and previous entry), in addition to the 100-entry limit; very large brush histories may therefore have fewer undo steps. Saved AI geometry and baseline masks share immutable pixels and copy only when painted.
+
+**Normal exports render from the original photo, not the reduced preview**, including local masks, curves, clarity, sharpening and image-wide effects. Native-resolution source tiles include neighboring pixels for seamless detail filters; 1024px render tiles bound intermediate GPU buffers, even for sources wider than the GPU texture limit. The final encoded image still requires memory proportional to export dimensions; extremely large outputs are rejected with a smaller-scale instruction. AI super-resolution retains its separate, intentionally reduced model input.
+
+Browser regressions (set `PLAYWRIGHT_MODULE` if Playwright is installed outside the project):
+
+```sh
+node scripts/check-render-pipeline.cjs   # CPU/GPU blend agreement, native tiled exports, cache invalidation
+node scripts/check-photo-transition.cjs # every-frame desktop/mobile resize and drawer alignment
+node scripts/check-mask-performance.cjs # sequential 24MP/six-mask desktop/mobile interaction + native export
+node scripts/check-intensity-review.cjs
+node scripts/check-detail-review.cjs
+```
+
+These use synthetic photos and saved responses, with no model calls. Mobile checks simulate Chromium touch/orientation; they do not certify physical iOS/Safari performance.
 
 ## Azure OpenAI premium review
 

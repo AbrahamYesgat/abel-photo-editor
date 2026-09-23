@@ -75,6 +75,7 @@ const result = require('../test/fixtures/intensity-review.json');
             const box = await page.locator('#review-photo-controls').boundingBox();
             assert.ok(box.x >= 0 && box.x + box.width <= (mobile ? 390 : 1440));
             assert.ok(box.y >= 0 && box.y + box.height <= (mobile ? 844 : 1000));
+            assert.ok(box.height <= 48, 'collapsed controls leave the photo unobscured');
             const tap = async intensity => {
                 const button = page.locator(`[data-intensity="${intensity}"]`);
                 if (mobile) await button.tap(); else await button.click();
@@ -95,11 +96,13 @@ const result = require('../test/fixtures/intensity-review.json');
                 assert.equal(await pixels(), hash);
             }
             assert.equal(new Set(Object.values(hashes)).size, 3, 'independently authored fixtures have distinct rendered results');
+            await page.locator('.review-photo-more > summary').click();
             await page.selectOption('#review-photo-mode', 'global');
             assert.equal(await page.evaluate(() => app.maskEngine.masks.length), 1, 'Global preserves only existing masks');
             const global = await pixels();
             await page.locator('#review-photo-strength').fill('50');
             await page.locator('#review-photo-strength').dispatchEvent('input');
+            await page.waitForFunction(() => app.state.exposure === .3);
             assert.equal(await page.evaluate(() => app.state.exposure), .3);
             const partial = await pixels();
             assert.notEqual(partial, global);

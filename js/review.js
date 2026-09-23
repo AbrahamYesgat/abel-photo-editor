@@ -40,7 +40,7 @@ class ReviewPanel {
         el['photo-details'].addEventListener('click', () => {
             if (!this.hasDetails()) return;
             this.includeDetails = !this.includeDetails;
-            this.apply();
+            this.apply(true);
         });
         el.intensity.value = this.intensity;
         el.intensity.addEventListener('change', () => this.chooseIntensity(el.intensity.value));
@@ -53,11 +53,11 @@ class ReviewPanel {
         el['photo-mode'].addEventListener('change', () => {
             this.selection = el['photo-mode'].value;
             el.alternative.value = this.selection;
-            this.apply();
+            this.apply(true);
         });
         el['photo-strength'].addEventListener('input', () => {
             el.strength.value = el['photo-strength'].value;
-            this.apply();
+            this.queueApply();
         });
         el['view-photo'].addEventListener('click', () => document.getElementById('close-sidebar').click());
         el['open-drawer'].addEventListener('click', () => document.querySelector(
@@ -85,8 +85,10 @@ class ReviewPanel {
                         this.selection = action;
                         el.alternative.value = action;
                     } else el.strength.value = el['gemini-strength'].value;
-                    if (this.appliedContext) this.apply();
-                    else { this.showAdjustments(); this.updateButtons(); }
+                    if (this.appliedContext) {
+                        if (field === 'gemini-strength') this.queueApply();
+                        else this.apply(true);
+                    } else { this.showAdjustments(); this.updateButtons(); }
                 }
             });
         }
@@ -169,7 +171,7 @@ class ReviewPanel {
         }
         el.strength.addEventListener('input', () => {
             el['strength-value'].value = `${el.strength.value}%`;
-            if (this.appliedContext) { this.apply(); return; }
+            if (this.appliedContext) { this.queueApply(); return; }
             this.showAdjustments();
             this.updateButtons();
         });
@@ -194,7 +196,7 @@ class ReviewPanel {
         if (this.controller) this.invalidate('Intensity changed during review. Click Review again when ready.');
         this.intensity = value;
         this.elements.intensity.value = value;
-        if (this.appliedContext) this.apply();
+        if (this.appliedContext) this.apply(true);
         else { this.showAdjustments(); this.updateButtons(); }
     }
 
@@ -606,6 +608,9 @@ class ReviewPanel {
     }
 
     invalidate(message) {
+        if (this._applyFrame) cancelAnimationFrame(this._applyFrame);
+        this._applyFrame = null;
+        if (this.app.maskEngine) this.app.maskEngine._reviewGeometry = null;
         this.controller?.abort();
         this.controller = null;
         this.checkingConnection = false;
@@ -1140,7 +1145,17 @@ class ReviewPanel {
             : 'Region map: 0% → 100% effect across the entire image; beyond the full-effect end it stays at 100%.', 'review-note'));
     }
 
-    apply() {
+    queueApply() {
+        if (this._applyFrame) return;
+        this._applyFrame = requestAnimationFrame(() => {
+            this._applyFrame = null;
+            this.apply(true);
+        });
+    }
+
+    apply(interactive = false) {
+        if (this._applyFrame) cancelAnimationFrame(this._applyFrame);
+        this._applyFrame = null;
         const switching = !!this.appliedContext;
         if (!this.result || !['global', 'adaptive'].includes(this.selection) || this.app.cropTool?.active ||
             !Number.isFinite(Number(this.elements.strength.value)) ||
@@ -1174,7 +1189,7 @@ class ReviewPanel {
             }
             const baselineIndex = this.app.history.indexOf(this.baselineHistory);
             if (baselineIndex < 0) throw new Error('Review history is no longer available.');
-            if (switching) this.app.maskEngine.restoreMasks(beforeMasks);
+            if (switching) this.app.maskEngine.restoreMasks(beforeMasks, true);
             this.app.state = next;
             this.app.maskEngine.masks = [...this.app.maskEngine.masks, ...newMasks];
             this.app.history = this.app.history.slice(0, baselineIndex + 1);
@@ -1187,7 +1202,8 @@ class ReviewPanel {
             this.appliedContext = this.snapshot();
             this.appliedOptions = { intensity: this.intensity || 'balanced', selection: this.selection,
                 strength: this.elements.strength.value, includeDetails: this.includeDetails };
-            this.app._render();
+            if (interactive) this.app._requestRender();
+            else this.app._render();
             this.showAdjustments();
             this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo — no new review. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
             this.updateButtons();

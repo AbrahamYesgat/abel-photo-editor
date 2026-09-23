@@ -73,6 +73,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
     });
     app.maskEngine = new context.MaskEngine(app);
     app._render = () => app.review?.onRender();
+    app._requestRender = app._render;
     app._pushHistory();
     let review = Object.create(context.ReviewPanel.prototype);
     Object.assign(review, {
@@ -991,11 +992,49 @@ test('normalized adaptive geometry maps to capped mask pixels, not original or p
     review.selection = 'adaptive';
     review.apply();
     const mask = app.maskEngine.masks[0];
-    assert.equal(mask.canvas.width, 4096);
-    assert.equal(mask.canvas.height, 2048);
-    assert.equal(mask.params.cx, 2048);
-    assert.equal(mask.params.cy, 1024);
-    assert.equal(mask.params.rx, 4096 * 0.3);
+    assert.equal(mask.canvas.width, 2048);
+    assert.equal(mask.canvas.height, 1024);
+    assert.equal(mask.params.cx, 1024);
+    assert.equal(mask.params.cy, 512);
+    assert.equal(mask.params.rx, 2048 * 0.3);
+});
+
+test('cached adaptive geometry and baseline mask pixels are shared until a brush mutation', () => {
+    const { app, review } = harness();
+    const baseline = app.maskEngine.createMask('brush');
+    app.maskEngine.touch(baseline);
+    app._pushHistory();
+    prepare(review, []);
+    review.result.adaptive.regions = [adaptiveRegion()];
+    review.selection = 'adaptive';
+    review.apply();
+    const geometry = app.maskEngine.masks[1].canvas;
+    const frozen = review.beforeMasks[0].canvas;
+    review.elements.strength.value = '50';
+    review.apply();
+    assert.equal(app.maskEngine.masks[1].canvas, geometry, 'strength changes reuse selection pixels');
+    assert.equal(app.maskEngine.masks[0].canvas, frozen, 'restoring a baseline does not copy its pixels');
+    const restored = app.maskEngine.masks[0];
+    app.maskEngine.touch(restored);
+    assert.notEqual(restored.canvas, frozen, 'drawing first makes a writable copy');
+    assert.equal(review.beforeMasks[0].canvas, frozen);
+});
+
+test('large brush history is trimmed by unique mask pixels, not just entry count', () => {
+    const { app } = harness();
+    app.imageWidth = 8000; app.imageHeight = 4000;
+    const mask = app.maskEngine.createMask('brush');
+    for (let i = 0; i < 16; i++) {
+        app.maskEngine.touch(mask);
+        app._pushHistory();
+    }
+    assert.equal(app.history.length, 9, '72 MiB holds nine unique 2048x1024 RGBA snapshots');
+    for (let i = 0; i < 10; i++) {
+        mask.adjustments.exposure = i / 10;
+        app._pushHistory();
+    }
+    assert.ok(app.history.length > 9, 'slider-only entries share pixels and retain useful undo history');
+    assert.equal(app.historyIndex, app.history.length - 1);
 });
 
 test('zero global strength does not quantize existing fractional slider values', () => {
