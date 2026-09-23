@@ -250,6 +250,16 @@ The preview already includes existing masks; they will be preserved unchanged.
 Regional values are offsets from ZERO, not global absolute targets. At full strength they
 add the regional lighting/color difference to the current composite; overlap can add up.
 Prefer separated regions and explain location, visible effect and possible spill in reason.
+SEAMLESS LOCAL LIGHT: Do not turn a subject into a bright spotlight. For ordinary finishing,
+prefer positive regional exposure <=0.3 EV Refine, <=0.5 Balanced, <=0.75 Expressive;
+these are guidance, not targets. Stronger deliberate relighting needs clear support from
+the user's intent. Expressive can still be bold in color and tonal direction without a halo.
+Judge the strongest center and overlapping corrections, not just the average area.
+Protect already bright faces, snow, sky and practical lights. Where a dark subject sits
+between bright neighbors, prefer a modest shadow lift or omit the region rather than
+lifting exposure across its whole bounding box. A soft ellipse cannot isolate an outline.
+Check center-to-surrounding brightness and all edges for a visible pool of light; reduce
+the offset, reposition/resize the ellipse or omit it if the transition would look artificial.
 Allowed regional keys: ${Object.keys(maskControls).join(', ')}.
 Strict regional absolute offset maxima by intensity (symmetric +/-):
 ${JSON.stringify(contract.regionalLimits)}

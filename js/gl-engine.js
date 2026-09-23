@@ -363,6 +363,7 @@ class GLEngine {
             uniform vec4 u_region;
             uniform int u_mode;
             uniform bool u_inverted;
+            uniform float u_opacity;
             void main() {
                 vec2 uv = vec2(v_uv.x, 1. - v_uv.y);
                 vec4 previous = texture2D(u_previous, uv);
@@ -372,6 +373,7 @@ class GLEngine {
                 if (layer.a == 0.) layer.rgb = vec3(0.);
                 float weight = texture2D(u_mask, u_region.xy + v_uv * u_region.zw).r;
                 if (u_inverted) weight = 1. - weight;
+                weight *= u_opacity;
                 if (u_mode == 1) {
                     vec4 base = texture2D(u_base, uv);
                     if (base.a == 0.) base.rgb = vec3(0.);
@@ -391,7 +393,7 @@ class GLEngine {
         gl.deleteShader(vs); gl.deleteShader(fs);
         if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('Mask compositor failed to initialize.');
         this._mixer = { program };
-        for (const name of ['base', 'layer', 'previous', 'mask', 'mode', 'inverted', 'region']) {
+        for (const name of ['base', 'layer', 'previous', 'mask', 'mode', 'inverted', 'region', 'opacity']) {
             this._mixer[name] = gl.getUniformLocation(program, `u_${name}`);
         }
     }
@@ -457,7 +459,7 @@ class GLEngine {
         };
         const prefixMasks = masks.slice(0, -1);
         const prefixKey = JSON.stringify([keys.slice(0, -1),
-            prefixMasks.map(mask => [mask.revision || 0, mask.inverted, mask.blend])]);
+            prefixMasks.map(mask => [mask.revision || 0, mask.inverted, mask.blend, mask.opacity ?? 1])]);
         const reusePrefix = masks.length > 1 && this._prefixKey === prefixKey &&
             prefixMasks.every((mask, index) => mask.canvas === this._prefixMasks?.[index]);
         let previous = reusePrefix ? this._prefixTarget : targets[0];
@@ -488,6 +490,7 @@ class GLEngine {
             gl.uniform4fv(mixer.region, this.region);
             gl.uniform1i(mixer.mode, mask.blend === 'additive' ? 1 : 0);
             gl.uniform1i(mixer.inverted, mask.inverted ? 1 : 0);
+            gl.uniform1f(mixer.opacity, mask.opacity ?? 1);
             bind(0, targets[0].texture); bind(1, layer.texture);
             bind(2, previous.texture); bind(3, entry.texture);
             // Only the completed composite is ever drawn to the visible canvas.

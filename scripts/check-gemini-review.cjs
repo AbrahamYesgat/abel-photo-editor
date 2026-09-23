@@ -57,7 +57,8 @@ async function run() {
             });
             await page.goto(base);
             await page.waitForFunction(() => window.app?.review);
-            assert.equal(await page.inputValue('#review-endpoint'), base);
+            assert.equal(await page.inputValue('#review-provider'), 'azure');
+            assert.equal(await page.inputValue('#review-endpoint'), 'https://abel-review-66c1d915.azurewebsites.net');
             assert.equal(await page.isChecked('#review-consent'), false);
             assert.equal(await page.inputValue('#review-gemini-mode'), 'global');
             assert.equal(reviews + checks, 0, 'initialization does not contact a backend or provider');
@@ -71,8 +72,8 @@ async function run() {
                 await app._loadFile(new File([blob], 'synthetic-region.png', { type: 'image/png' }));
             });
             await page.locator(viewport.width < 500 ? '.mobile-tab[data-panel="review"]' : '.vtab[data-panel="review"]').click();
+            await page.selectOption('#review-provider', provider);
             if (provider === 'azure') {
-                await page.selectOption('#review-provider', 'azure');
                 assert.equal(await page.inputValue('#review-endpoint'), 'https://abel-review-66c1d915.azurewebsites.net');
                 await page.locator('#review-connection').evaluate(node => { node.open = true; });
                 await page.fill('#review-endpoint', base);
@@ -164,10 +165,10 @@ async function run() {
             }
             await page.reload();
             await page.waitForFunction(() => window.app?.review);
-            if (provider === 'azure') {
-                assert.equal(await page.inputValue('#review-endpoint'), base, 'Azure endpoint never fills Gemini fields');
+            if (provider === 'gemini') {
+                assert.equal(await page.inputValue('#review-endpoint'), 'https://abel-review-66c1d915.azurewebsites.net', 'Gemini endpoint never fills Azure fields');
                 await page.evaluate(() => {
-                    app.review.elements.provider.value = 'azure';
+                    app.review.elements.provider.value = 'gemini';
                     app.review.changeProvider();
                 });
             }

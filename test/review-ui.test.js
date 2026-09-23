@@ -252,16 +252,50 @@ function azureHarness(options) {
     return fixture;
 }
 
-test('clarity opt-in is off on initialization and never stored with connection preferences', async () => {
+test('radial refinement preserves adjustments, validates geometry and snapshots opacity without pixel copies', () => {
+    const { app } = harness();
+    const mask = app.maskEngine.createMask('radial');
+    app.maskEngine.createRadialMask(250, 200, 125, 80, 100);
+    mask.adjustments.exposure = .5;
+    app._pushHistory();
+    const old = app.maskEngine.captureMasks()[0];
+    mask.opacity = .4;
+    const faded = app.maskEngine.captureMasks()[0];
+    assert.equal(old.canvas, faded.canvas, 'opacity-only edits reuse immutable snapshot pixels');
+    assert.equal(faded.opacity, .4);
+    assert.equal(old.opacity, 1);
+    assert.equal(app.maskEngine.refineRadial('rx', 10), true);
+    assert.equal(mask.params.rx, 50);
+    assert.equal(mask.params.ry, 80);
+    assert.equal(mask.params.feather, 100);
+    assert.equal(mask.adjustments.exposure, .5);
+    assert.equal(mask.opacity, .4);
+    const revision = mask.revision;
+    for (const [key, value] of [['rx', 0], ['cx', 101], ['feather', -1], ['ry', NaN], ['rx', '20'], ['other', 20]]) {
+        assert.equal(app.maskEngine.refineRadial(key, value), false);
+    }
+    assert.equal(mask.revision, revision);
+    app.maskEngine.restoreMasks([old], true);
+    const restored = app.maskEngine.getActiveMask();
+    app.maskEngine.refineRadial('cx', 30);
+    assert.notEqual(restored.canvas, old.canvas, 'refining a shared mask copies pixels before modification');
+    assert.equal(old.params.cx, 250);
+    restored.blend = 'additive';
+    app.maskEngine.handlePointerDown(0, 0, 100, 100);
+    app.maskEngine.handlePointerMove(0, 0, 300, 250);
+    assert.equal(restored.params.feather, 100, 'redrawing an AI ellipse retains its soft feather');
+});
+
+test('clarity defaults on but is never stored with connection preferences', async () => {
     const { review, context, storage } = geminiHarness();
-    assert.equal(review.elements['allow-details'].checked, false);
+    assert.equal(review.elements['allow-details'].checked, true);
     review.elements['allow-details'].checked = true;
     review.elements['remember-gemini'].checked = true;
     context.fetch = async () => Response.json(response([]));
     await review.analyze();
     assert.equal(JSON.stringify([...storage.values]).includes('allowDetails'), false);
     const restored = geminiHarness({ storage });
-    assert.equal(restored.review.elements['allow-details'].checked, false);
+    assert.equal(restored.review.elements['allow-details'].checked, true);
 });
 
 test('cached detail toggles preserve nonzero baseline clarity and masks, with no calls or stacking', () => {
@@ -321,6 +355,7 @@ test('cached detail toggles preserve nonzero baseline clarity and masks, with no
 
 test('browser rejects unsolicited detail and policy changes cancel pending requests before application', async () => {
     const { app, review, context } = geminiHarness();
+    review.elements['allow-details'].checked = false;
     const detail = require('./helpers/detail-fixture.cjs');
     context.fetch = async () => Response.json(detail(0));
     await review.analyze();
@@ -408,7 +443,7 @@ test('Azure separates cloud credentials, defaults and terms without granting con
     assert.equal(review.elements.token.value, '');
     assert.equal(review.savedGeminiConnection, null);
     assert.equal(review.endpoint(), 'http://localhost:3000/api/review/azure');
-    assert.equal(review.elements['remember-gemini'].checked, false);
+    assert.equal(review.elements['remember-gemini'].checked, true);
     assert.match(review.elements['consent-text'].textContent, /Microsoft Azure OpenAI/);
     assert.match(review.elements['data-terms'].href, /microsoft.com/);
     assert.equal(review.elements['gemini-mode'].value, 'global');
@@ -1363,7 +1398,7 @@ test('only successful validated local reviews persist; cloud credentials and req
             context.ReviewContract = { ...ReviewContract, validateRequest() {} };
             context.fetch = async (url, options) => {
                 assert.equal(options.headers.Authorization, `Bearer ${provider === 'local' ? savedLocal.token : 'synthetic-cloud-token'}`);
-                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowDetails', 'image', 'intent']);
+                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowDetails', 'detailAdjustments', 'image', 'intent']);
                 assert.ok(!options.body.includes('token'));
                 return Response.json(valid ? response([]) : { error: 'Malformed review' });
             };

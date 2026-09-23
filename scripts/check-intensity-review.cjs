@@ -59,6 +59,7 @@ const result = require('../test/fixtures/intensity-review.json');
             const beforeEdits = await page.evaluate(() => app.review.snapshot().edits);
             const baselineHistory = await page.evaluate(() => app.history.length);
             await page.locator(mobile ? '.mobile-tab[data-panel=review]' : '.vtab[data-panel=review]').click();
+            await page.selectOption('#review-provider', 'gemini');
             await page.locator('#review-connection').evaluate(node => { node.open = true; });
             // The mocked endpoint is local to this page, including on Pages.
             await page.fill('#review-endpoint', new URL(base).origin);
@@ -97,6 +98,8 @@ const result = require('../test/fixtures/intensity-review.json');
             }
             assert.equal(new Set(Object.values(hashes)).size, 3, 'independently authored fixtures have distinct rendered results');
             await page.locator('.review-photo-more > summary').click();
+            assert.equal(await page.textContent('#review-photo-details'), 'No AI clarity suggested');
+            assert.equal(await page.isDisabled('#review-photo-details'), true);
             await page.selectOption('#review-photo-mode', 'global');
             assert.equal(await page.evaluate(() => app.maskEngine.masks.length), 1, 'Global preserves only existing masks');
             const global = await pixels();

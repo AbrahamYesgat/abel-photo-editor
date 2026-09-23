@@ -1,4 +1,24 @@
 /* ABEL — Professional Photo Editor UI */
+.mask-geometry-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+}
+.mask-geometry-grid label { font-size: 11px; color: var(--text-secondary); }
+.mask-geometry-grid input {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin-top: 4px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 6px;
+}
+#mask-geometry > summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+
 :root {
     --bg-app: #111111;
     --bg-panel: #1e1e1e;

@@ -37,6 +37,7 @@ const { createServer } = require('../server/index.js');
             const first = app.maskEngine.createMask('radial');
             app.maskEngine.createRadialMask(420, 450, 380, 420, 90);
             first.adjustments.exposure = .3;
+            first.opacity = .4;
             const second = app.maskEngine.createMask('gradient');
             app.maskEngine.createLinearMask(0, 80, 1310, 820, true);
             second.blend = 'additive';
@@ -48,6 +49,7 @@ const { createServer } = require('../server/index.js');
             app.maskEngine.brushMove(900, 350); app.maskEngine.brushEnd();
             third.adjustments.temperature = 8;
             third.inverted = true;
+            third.opacity = .7;
             app._pushHistory();
             const engine = app.glEngine, gl = engine.gl;
             const pixels = canvas => {
@@ -87,12 +89,12 @@ const { createServer } = require('../server/index.js');
                     if (mask.blend === 'additive') {
                         const data = ctx.getImageData(0, 0, w, h);
                         for (let i = 0; i < md.length; i += 4) {
-                            const weight = (mask.inverted ? 255 - md[i] : md[i]) / 255;
+                            const weight = (mask.inverted ? 255 - md[i] : md[i]) / 255 * (mask.opacity ?? 1);
                             for (let c = 0; c < 3; c++) data.data[i + c] += (layer.data[i + c] - base[i + c]) * weight;
                         }
                         ctx.putImageData(data, 0, 0);
                     } else {
-                        for (let i = 0; i < md.length; i += 4) layer.data[i + 3] = mask.inverted ? 255 - md[i] : md[i];
+                        for (let i = 0; i < md.length; i += 4) layer.data[i + 3] = (mask.inverted ? 255 - md[i] : md[i]) * (mask.opacity ?? 1);
                         mctx.putImageData(layer, 0, 0);
                         ctx.drawImage(selection, 0, 0);
                     }
@@ -107,6 +109,12 @@ const { createServer } = require('../server/index.js');
             app._render();
             const blend = difference(expected, pixels(engine.canvas).data);
             check(blend.max <= 3 && blend.mean < .5, `GPU/CPU blend accuracy: ${JSON.stringify(blend)}`);
+            first.opacity = .8;
+            const changedOpacity = cpuReference();
+            app._render();
+            const opacityDiff = difference(changedOpacity, pixels(engine.canvas).data);
+            check(opacityDiff.max <= 3 && opacityDiff.mean < .5,
+                `earlier-mask opacity invalidates the cached composite prefix: ${JSON.stringify(opacityDiff)}`);
             const before = pixels(engine.canvas).data;
             // Cached geometry must not hide brush edits, visibility, inversion or deletion.
             app.maskEngine.brushStart(300, 300); app.maskEngine.brushEnd(); app._render();

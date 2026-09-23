@@ -14,7 +14,7 @@ class ReviewPanel {
         this.includeDetails = false;
         this.requestPolicy = null;
         this.elements = {};
-        this.cloudProvider = 'gemini';
+        this.cloudProvider = document.getElementById('review-provider').value === 'gemini' ? 'gemini' : 'azure';
         this.cloudConnections = {};
         for (const name of ['endpoint', 'token', 'intent', 'consent', 'analyze', 'cancel',
             'status', 'result', 'feedback', 'adjustments', 'apply-bar', 'strength',
@@ -33,7 +33,7 @@ class ReviewPanel {
             this.elements[name] = document.getElementById(`review-${name}`);
         }
         const el = this.elements;
-        el['allow-details'].checked = false;
+        el['allow-details'].checked = true;
         el['allow-details'].addEventListener('change', () => {
             this.invalidate('Detail permission changed. Request a new review; existing edits are unchanged.');
         });
@@ -63,7 +63,7 @@ class ReviewPanel {
         el['open-drawer'].addEventListener('click', () => document.querySelector(
             window.innerWidth <= 700 ? '.mobile-tab[data-panel="review"]' : '.vtab[data-panel="review"]').click());
         el['local-endpoint'].value = this.localDefault();
-        el.endpoint.value = window.location.origin;
+        el.endpoint.value = this.cloudDefault(this.cloudProvider);
         el.intent.value = this.defaultIntent();
         el['check-gemini'].addEventListener('click', () => this.checkGeminiConnection());
         el['forget-gemini'].addEventListener('click', () => this.forgetGeminiConnection());
@@ -177,6 +177,7 @@ class ReviewPanel {
         });
         app._bindHoldCompare(el.compare, false, true);
         this.restoreGeminiConnection();
+        this.changeProvider();
         this.restoreLocalConnection();
         this.updateButtons();
     }
@@ -465,7 +466,7 @@ class ReviewPanel {
             const connection = this.cloudConnections[provider];
             this.elements.endpoint.value = connection?.endpoint || this.cloudDefault(provider);
             this.elements.token.value = connection?.token || '';
-            this.elements['remember-gemini'].checked = connection?.remember || false;
+            this.elements['remember-gemini'].checked = connection?.remember ?? true;
             this.savedGeminiConnection = connection?.saved || null;
             this.geminiStorageIssue = connection?.issue || false;
             this.geminiStorageStatus('Separate cloud connection. Check it before sending a photo.');
@@ -670,9 +671,15 @@ class ReviewPanel {
         el['photo-mode'].value = this.selection || 'global';
         el['photo-strength'].value = el.strength.value;
         el['photo-strength-value'].value = `${el.strength.value}%`;
-        el['photo-details'].hidden = !this.hasDetails();
-        el['photo-details'].disabled = busy;
-        el['photo-details'].setAttribute('aria-pressed', String(!!this.includeDetails));
+        const hasDetails = this.hasDetails();
+        el['photo-details'].hidden = !this.appliedContext;
+        el['photo-details'].disabled = busy || !hasDetails;
+        el['photo-details'].textContent = hasDetails ? `Details: ${this.includeDetails ? 'on' : 'off'}` : 'No AI clarity suggested';
+        el['photo-details'].setAttribute('aria-label', hasDetails ? 'Include AI clarity in this saved treatment' : 'No AI clarity suggested in this treatment');
+        el['photo-details'].title = hasDetails
+            ? 'Off keeps the same lighting/color treatment and your original clarity. No new AI call.'
+            : 'This recipe has no AI clarity changes. Allow detail adjustments before a new review to permit them; they are not guaranteed.';
+        el['photo-details'].setAttribute('aria-pressed', String(hasDetails && !!this.includeDetails));
         el['strength-value'].value = `${el.strength.value}%`;
         if (this.appliedContext) {
             el['gemini-strength'].value = el.strength.value;
@@ -1205,7 +1212,7 @@ class ReviewPanel {
             if (interactive) this.app._requestRender();
             else this.app._render();
             this.showAdjustments();
-            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo — no new review. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
+            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo; ⋯ opens Details and strength — no new review. ${this.hasDetails() ? 'AI clarity is available in this treatment.' : 'No AI clarity suggested in this treatment; your original detail settings remain.'} Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
             this.updateButtons();
         } catch (error) {
             if (rollback) {

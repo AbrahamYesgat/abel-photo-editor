@@ -206,6 +206,9 @@ class App {
             const mask = this.maskEngine.getActiveMask();
             const realKey = key.replace('mask_', '');
             if (mask) mask.adjustments[realKey] = value;
+        } else if (category === 'maskOpacity') {
+            const mask = this.maskEngine.getActiveMask();
+            if (mask) mask.opacity = Math.max(0, Math.min(1, value / 100));
         } else if (category === 'brush') {
             this.maskEngine[key] = value;
             return;
@@ -480,6 +483,40 @@ class App {
         reviewReason.className = 'panel-info';
         reviewReason.hidden = true;
         maskAdj.appendChild(reviewReason);
+        this._createSlider(maskAdj, 'Mask strength (%)', 'mask_opacity', 0, 100, 1, 100, 'maskOpacity');
+        this.sliders.mask_opacity.input.setAttribute('aria-label', 'Mask strength');
+        const geometry = document.createElement('details');
+        geometry.id = 'mask-geometry';
+        const geometryTitle = document.createElement('summary');
+        geometryTitle.textContent = 'Refine radial position & feather';
+        geometry.appendChild(geometryTitle);
+        const geometryFields = document.createElement('div');
+        geometryFields.className = 'mask-geometry-grid';
+        this.maskGeometryInputs = {};
+        for (const [key, label] of [['cx', 'Center X (%)'], ['cy', 'Center Y (%)'],
+            ['rx', 'Horizontal radius (%)'], ['ry', 'Vertical radius (%)'], ['feather', 'Feather (%)']]) {
+            const field = document.createElement('label');
+            field.textContent = label;
+            const input = document.createElement('input');
+            input.type = 'number'; input.min = key === 'rx' || key === 'ry' ? '0.1' : '0';
+            input.max = '100'; input.step = '0.01';
+            input.id = `mask-geometry-${key}`;
+            input.addEventListener('change', () => {
+                if (!input.value || !input.checkValidity()) { this._syncMaskSliders(); return; }
+                this._pushHistory();
+                if (this.maskEngine.refineRadial(key, Number(input.value))) {
+                    this.review?.invalidate('Mask refined. Saved AI alternatives cleared to preserve your changes; undo restores the previous mask.');
+                    this._requestRender(true);
+                    this._pushHistory();
+                }
+                this._syncMaskSliders();
+            });
+            field.appendChild(input);
+            geometryFields.appendChild(field);
+            this.maskGeometryInputs[key] = input;
+        }
+        geometry.appendChild(geometryFields);
+        maskAdj.appendChild(geometry);
 
         const maskSliders = [
             ['Exposure', 'mask_exposure', -5, 5, 0.01, 0],
@@ -607,7 +644,18 @@ class App {
         if (reason) {
             reason.hidden = !mask?.reason;
             reason.textContent = mask?.reason
-                ? `${mask.name || 'Adaptive region'}: ${mask.reason} Soft approximation; drag to redraw or adjust the sliders below.` : '';
+                ? `${mask.name || 'Adaptive region'}: ${mask.reason} Soft approximation, not a subject outline. Reduce Mask strength or refine position/radii/feather below. Manual changes clear saved AI alternatives so they cannot overwrite your refinement; undo restores the previous edit.` : '';
+        }
+        if (this.maskGeometryInputs) {
+            document.getElementById('mask-geometry').hidden = mask?.type !== 'radial' || !mask.params;
+            if (mask?.type === 'radial' && mask.params) {
+                for (const [key, input] of Object.entries(this.maskGeometryInputs)) {
+                    const dimension = key === 'feather' ? 100 : ['cx', 'rx'].includes(key) ? mask.canvas.width : mask.canvas.height;
+                    input.value = Number((mask.params[key] / dimension * 100).toFixed(2));
+                }
+            }
+            this.sliders.mask_opacity.input.value = (mask?.opacity ?? 1) * 100;
+            this.sliders.mask_opacity.val.textContent = Math.round((mask?.opacity ?? 1) * 100);
         }
         const adj = mask ? mask.adjustments : {};
         const maskKeys = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation', 'clarity'];
@@ -1005,6 +1053,7 @@ class App {
     _canvasPointerUp() {
         if (!this.maskMode) return;
         this.maskEngine.handlePointerUp();
+        this._syncMaskSliders();
         if (this.showMaskOverlay) this._renderMaskOverlay();
         this._render();
         this._pushHistory();
@@ -1028,7 +1077,7 @@ class App {
 
     _loadFile(file) {
         this._stopComparison();
-        if (this.review) this.review.elements['allow-details'].checked = false;
+        if (this.review) this.review.elements.consent.checked = false;
         this.review?.invalidate('Loading a new photo. Review it once it is ready.');
         // Store original filename for export
         this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
@@ -2719,7 +2768,7 @@ class Library {
                 inverted: m.inverted,
                 adjustments: { ...m.adjustments },
                 visible: m.visible,
-                name: m.name, reason: m.reason, blend: m.blend, params: m.params,
+                name: m.name, reason: m.reason, blend: m.blend, params: m.params, opacity: m.opacity ?? 1,
                 canvasData: m.canvas.toDataURL('image/png'),
             })),
             timestamp: Date.now(),
@@ -2795,6 +2844,7 @@ class Library {
                         mask.name = savedMask.name;
                         mask.reason = savedMask.reason;
                         mask.blend = savedMask.blend === 'additive' ? 'additive' : undefined;
+                        mask.opacity = Number.isFinite(savedMask.opacity) ? Math.max(0, Math.min(1, savedMask.opacity)) : 1;
                         mask.params = savedMask.params;
 
                         // Restore the mask canvas image data

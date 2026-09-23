@@ -57,6 +57,15 @@ test('both providers share bounded optional soft-region instructions without seg
     assert.ok(systemInstruction.includes(JSON.stringify(require('../js/review-contract.js').regionalLimits)));
 });
 
+test('regional light guidance avoids spotlights without flattening expressive recipes', () => {
+    for (const rule of ['SEAMLESS LOCAL LIGHT', '<=0.3 EV Refine', '<=0.5 Balanced', '<=0.75 Expressive',
+        'guidance, not targets', 'strongest center', 'between bright neighbors',
+        'modest shadow lift or omit', 'cannot isolate an outline',
+        'reposition/resize the ellipse or omit', 'bold in color and tonal direction']) {
+        assert.ok(systemInstruction.includes(rule), rule);
+    }
+});
+
 test('localization specifies image-grounded extents, radii conversion, gradient spill and uncertain-region omission', () => {
     for (const rule of ['origin top-left', 'x rightward, y downward', 'width=(R-L)/2',
         'height=(B-T)/2', 'width=0.10, height=0.20', 'four ellipse edges',

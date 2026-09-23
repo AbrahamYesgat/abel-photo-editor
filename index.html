@@ -107,7 +107,7 @@
                     <button type="button" data-intensity="expressive" aria-pressed="false">Expressive</button>
                 </div>
                 <details class="review-photo-more">
-                    <summary aria-label="More saved edit controls" title="Mode, strength, details and review">⋯</summary>
+                    <summary aria-label="More edit controls: mode, strength and Details" title="Mode, strength, details and review">⋯</summary>
                     <div class="review-photo-expanded">
                 <div class="review-photo-options">
                     <select id="review-photo-mode" aria-label="Apply saved AI mode">
@@ -203,18 +203,18 @@
                 <!-- Panel Contents -->
                 <div class="panels-container">
             <div class="edit-panel" id="panel-review">
-                <div class="review-heading"><h2>Photo review</h2><span id="review-provider-badge">Gemini Cloud</span></div>
+                <div class="review-heading"><h2>Photo review</h2><span id="review-provider-badge">Azure OpenAI Cloud</span></div>
                 <p class="review-note">A second pair of eyes, not a verdict. Ratings are subjective. Apply changes only light and color; crop suggestions are advice only.</p>
                 <label class="review-field-label" for="review-provider">Review with</label>
                 <select id="review-provider">
+                    <option value="azure" selected>Azure OpenAI — Premium cloud</option>
                     <option value="gemini">Gemini - Google Cloud</option>
-                    <option value="azure">Azure OpenAI — Premium cloud</option>
                     <option value="local">Qwen - This computer</option>
                     <option value="manual">ChatGPT — Manual import</option>
                 </select>
-                <p id="review-provider-note" class="review-note">Cloud reviews send a preview to Google and use your project's API quota.</p>
+                <p id="review-provider-note" class="review-note">Premium image critique through your Azure OpenAI deployment. Uses Azure token quota and the server's monthly review allowance.</p>
                 <details id="review-connection" class="review-connection">
-                    <summary id="review-connection-title">Connect Gemini backend</summary>
+                    <summary id="review-connection-title">Connect Azure OpenAI backend</summary>
                     <div id="review-cloud-settings">
                     <p class="review-note">Cloud API keys belong on your server, never here. Gemini and Azure keep separate connections. GitHub Pages needs a connected backend: hosted, or your running local companion.</p>
                     <label for="review-endpoint">Backend URL (blank for this server)</label>
@@ -223,10 +223,10 @@
                         <label for="review-token">Backend access token (not an API key; required for Azure)</label>
                         <input id="review-token" type="password" autocomplete="off" spellcheck="false" aria-describedby="review-gemini-storage-note">
                     </div>
-                    <label class="review-consent"><input id="review-remember-gemini" type="checkbox" aria-describedby="review-gemini-storage-note">Remember selected cloud connection on this browser</label>
-                    <p id="review-gemini-storage-note" class="review-note">Opt in to save the verified backend URL and access token unencrypted in this site's browser storage, separately for each cloud provider. Scripts on this site can read it; avoid shared devices. Never enter a cloud API key. Photo, intent and upload consent are never saved.</p>
+                    <label class="review-consent"><input id="review-remember-gemini" type="checkbox" checked aria-describedby="review-gemini-storage-note">Remember selected cloud connection on this browser</label>
+                    <p id="review-gemini-storage-note" class="review-note">On by default: saves the verified backend URL and access token unencrypted in this site's browser storage, separately for each cloud provider, after a successful connection check or review. Uncheck on shared devices; scripts on this site can read it. Never enter a cloud API key. Photo, intent and upload consent are never saved.</p>
                     <p id="review-gemini-storage-status" class="review-note" role="status">Defaults to this server. Saved connections fill automatically; no remote backend or secret can be discovered.</p>
-                    <button id="review-check-gemini" class="btn btn-outline" type="button">Check Gemini connection</button>
+                    <button id="review-check-gemini" class="btn btn-outline" type="button">Check Azure OpenAI connection</button>
                     <button id="review-forget-gemini" class="btn btn-outline" type="button" hidden>Forget / change selected cloud connection</button>
                     </div>
                     <div id="review-local-settings" hidden>
@@ -259,8 +259,8 @@
                     <option value="expressive">Expressive — intentional light and color</option>
                 </select>
                 <p class="review-note">One review prepares all three, each with Global and Adaptive alternatives. After Apply, tap the controls beside the photo to switch without regenerating or stacking edits. Rating always describes the reviewed image.</p>
-                <label class="review-consent"><input id="review-allow-details" type="checkbox" aria-describedby="review-detail-note">Allow detail adjustments (clarity only)</label>
-                <p id="review-detail-note" class="review-note">Off by default. Optional small clarity changes, judged from a reduced preview—not full resolution. Intentional softness stays protected. Texture is not supported; sharpening and noise reduction stay manual. After Apply, Details compares the same cached light/color treatment with or without AI clarity, preserving your original detail settings. No extra AI call.</p>
+                <label class="review-consent"><input id="review-allow-details" type="checkbox" checked aria-describedby="review-detail-note">Allow detail adjustments (clarity only)</label>
+                <p id="review-detail-note" class="review-note">On by default for all providers, including manual export. Allows—not forces—small clarity changes when justified by the reduced preview. Uncheck before reviewing to keep detail manual. Intentional softness stays protected. Texture is not supported; sharpening and noise reduction stay manual. After Apply, open ⋯ beside the intensity buttons for Details: compare cached AI clarity on/off without changing the lighting/color treatment or your original clarity. No extra AI call. Older reviews without clarity need a new review to suggest it.</p>
                 <div id="review-gemini-options">
                     <label class="review-field-label" for="review-gemini-mode">One-click action</label>
                     <select id="review-gemini-mode">
@@ -274,7 +274,7 @@
                 </div>
                 <label id="review-consent-label" class="review-consent">
                     <input id="review-consent" type="checkbox">
-                    <span><span id="review-consent-text">Send a reduced photo preview and my editing intent to the connected server and Google. Free-tier content may be used to improve Google's products.</span> <a id="review-data-terms" href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer">Data terms</a></span>
+                    <span><span id="review-consent-text">Send a reduced photo preview and my editing intent to the connected server and Microsoft Azure OpenAI. Azure processing, retention and abuse-monitoring terms apply.</span> <a id="review-data-terms" href="https://learn.microsoft.com/en-us/azure/ai-foundry/responsible-ai/openai/data-privacy" target="_blank" rel="noopener noreferrer">Data terms</a></span>
                 </label>
                 <div class="review-request-actions">
                     <button id="review-analyze" class="btn btn-accent" disabled>Review &amp; apply Global</button>

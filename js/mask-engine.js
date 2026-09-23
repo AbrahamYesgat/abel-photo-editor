@@ -41,7 +41,7 @@ class MaskEngine {
                 size: [mask.canvas.width, mask.canvas.height],
                 type: mask.type, visible: mask.visible, inverted: mask.inverted,
                 adjustments: { ...mask.adjustments }, params: mask.params,
-                name: mask.name, reason: mask.reason, blend: mask.blend
+                name: mask.name, reason: mask.reason, blend: mask.blend, opacity: mask.opacity ?? 1
             };
         });
     }
@@ -150,6 +150,7 @@ class MaskEngine {
             inverted: false,
             adjustments: this._defaultMaskAdjustments(),
             visible: true,
+            opacity: 1,
             // For radial/gradient
             params: null,
         };
@@ -223,6 +224,18 @@ class MaskEngine {
     }
 
     // Radial gradient mask
+    refineRadial(key, percent) {
+        const mask = this.getActiveMask();
+        if (mask?.type !== 'radial' || !mask.params || !Number.isFinite(percent)) return false;
+        const dimensions = { cx: mask.canvas.width, cy: mask.canvas.height,
+            rx: mask.canvas.width, ry: mask.canvas.height, feather: 100 };
+        if (!Object.hasOwn(dimensions, key) || percent < (key === 'rx' || key === 'ry' ? 0.1 : 0) ||
+            percent > 100) return false;
+        const p = { ...mask.params, [key]: percent * dimensions[key] / 100 };
+        this.createRadialMask(p.cx, p.cy, p.rx, p.ry, p.feather);
+        return true;
+    }
+
     createRadialMask(cx, cy, rx, ry, feather) {
         const mask = this.getActiveMask();
         if (!mask || mask.type !== 'radial') return;
@@ -532,7 +545,8 @@ class MaskEngine {
                 const cy = (this._startPos.y + imgY) / 2;
                 const rx = Math.abs(imgX - this._startPos.x) / 2;
                 const ry = Math.abs(imgY - this._startPos.y) / 2;
-                this.createRadialMask(cx, cy, Math.max(rx, 10), Math.max(ry, 10), 50);
+                this.createRadialMask(cx, cy, Math.max(rx, 10), Math.max(ry, 10),
+                    mask.params?.feather ?? (mask.blend === 'additive' ? 100 : 50));
             } else if (mask.type === 'gradient') {
                 this.createLinearMask(this._startPos.x, this._startPos.y, imgX, imgY, mask.blend === 'additive');
             }

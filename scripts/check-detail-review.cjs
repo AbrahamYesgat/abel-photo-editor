@@ -25,7 +25,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
             page.on('pageerror', error => errors.push(error.message));
             await page.route('**/*', route => {
                 const url = new URL(route.request().url());
-                if (url.pathname.endsWith('/api/review')) {
+                if (url.pathname.endsWith('/api/review/azure')) {
                     requests.push(route.request().postDataJSON());
                     return route.fulfill({ json: fixture() });
                 }
@@ -54,7 +54,12 @@ const hash = value => createHash('sha256').update(value).digest('hex');
                 app._pushHistory(); app._render();
             });
             await load();
-            assert.equal(await page.isChecked('#review-allow-details'), false);
+            assert.equal(await page.inputValue('#review-provider'), 'azure');
+            assert.equal(await page.isChecked('#review-allow-details'), true);
+            assert.equal(await page.isChecked('#review-remember-gemini'), true);
+            assert.equal(await page.isChecked('#review-remember-local'), true);
+            assert.equal(await page.isChecked('#review-consent'), false);
+            assert.equal(requests.length, 0, 'startup and photo load do not request a review');
             const png = () => page.evaluate(() => app._renderedCanvas().toDataURL().split(',')[1]);
             const pixels = async () => hash(Buffer.from(await png(), 'base64'));
             const exportPixels = async () => hash(Buffer.from(await page.evaluate(() => new Promise(resolve => {
@@ -75,6 +80,7 @@ const hash = value => createHash('sha256').update(value).digest('hex');
             await page.locator(mobile ? '.mobile-tab[data-panel=review]' : '.vtab[data-panel=review]').click();
             await page.locator('#review-connection').evaluate(node => { node.open = true; });
             await page.fill('#review-endpoint', new URL(base).origin);
+            await page.fill('#review-token', 'synthetic-browser-test-token');
             await page.locator('#review-connection').evaluate(node => { node.open = false; });
             await page.check('#review-allow-details');
             await page.check('#review-consent');
@@ -162,7 +168,15 @@ const hash = value => createHash('sha256').update(value).digest('hex');
             });
             assert.deepEqual(flat[0], flat[1], 'clarity compares source with source, not post-exposure color');
             await load();
-            assert.equal(await page.isChecked('#review-allow-details'), false, 'new photo requires fresh opt-in');
+            assert.equal(await page.isChecked('#review-allow-details'), true, 'new photo retains detail preference');
+            assert.equal(await page.isChecked('#review-consent'), false, 'new photo requires fresh upload consent');
+            await page.evaluate(() => {
+                app.review.elements['allow-details'].checked = false;
+                app.review.elements['allow-details'].dispatchEvent(new Event('change'));
+            });
+            await load();
+            assert.equal(await page.isChecked('#review-allow-details'), false, 'new photo preserves explicit clarity opt-out');
+            assert.deepEqual(await page.evaluate(() => app.review.detailRequest()), { allowDetails: false });
             assert.equal(await details.isVisible(), false);
             assert.deepEqual(errors, []);
             console.log(`${mobile ? 'Mobile 320px' : 'Desktop'}: detail pixel effect, cached comparison, masks, export, undo/redo, bounds and reset passed.`);
