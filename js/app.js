@@ -697,13 +697,26 @@ class App {
 
     _bindEvents() {
         // File import
+        document.getElementById('raw-half-size').checked = ImageImport.mobile;
+        document.getElementById('import-cancel').addEventListener('click', () => {
+            this._importController?.abort();
+            window.library?._importController?.abort();
+        });
         document.getElementById('btn-import').addEventListener('click', () => {
             document.getElementById('file-input').click();
         });
-        document.getElementById('file-input').addEventListener('change', (e) => {
+        document.getElementById('file-input').addEventListener('change', async (e) => {
             if (e.target.files[0]) {
-                this._loadFile(e.target.files[0]);
-                if (window.library) window.library.addFiles(Array.from(e.target.files));
+                const file = e.target.files[0];
+                e.target.value = '';
+                await window.library?._saveCurrentEdits();
+                if (await this._loadFile(file)) {
+                    if (window.library) {
+                        window.library.activeIndex = -1;
+                        await window.library.addFiles([file], ImageImport.thumb(this.image));
+                        window.library.activeIndex = window.library.photos.findIndex(p => p.id === window.library._photoId(file));
+                    }
+                }
             }
         });
 
@@ -728,9 +741,12 @@ class App {
                 dropZone.classList.remove('drag-over');
             });
         });
-        container.addEventListener('drop', (e) => {
+        container.addEventListener('drop', async (e) => {
             const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) this._loadFile(file);
+            if (file) {
+                await window.library?._saveCurrentEdits();
+                if (await this._loadFile(file) && window.library) window.library.activeIndex = -1;
+            }
         });
 
         // Toolbar buttons
@@ -1075,39 +1091,61 @@ class App {
 
     // ======================== File I/O ========================
 
-    _loadFile(file) {
+    _importStatus(text, error = false) {
+        const status = document.getElementById('import-status');
+        status.textContent = text;
+        status.dataset.error = String(error);
+    }
+
+    async _loadFile(file, options = {}) {
+        this._importController?.abort();
+        const controller = this._importController = new AbortController();
         this._stopComparison();
         if (this.review) this.review.elements.consent.checked = false;
         this.review?.invalidate('Loading a new photo. Review it once it is ready.');
-        // Store original filename for export
-        this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
+        document.getElementById('import-cancel').hidden = false;
+        this._importStatus('Opening photo locally…');
+        let decoded;
+        try {
+            decoded = await ImageImport.decode(file, { signal: controller.signal,
+                halfSize: options.halfSize ?? document.getElementById('raw-half-size').checked,
+                onStatus: text => { if (!controller.signal.aborted) this._importStatus(text); } });
+            const img = decoded.image;
+            if (controller.signal.aborted) { ImageImport.release(img); return false; }
+            this.glEngine.loadImage(img);
+            if (this._preCropImage !== this.image) ImageImport.release(this._preCropImage);
+            this._preCropImage = null;
+            this._preCropSnapshot = null;
+            ImageImport.release(this.image);
+            this.image = img;
+            this.imageWidth = img.naturalWidth || img.width;
+            this.imageHeight = img.naturalHeight || img.height;
+            this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
+            this._originalFile = file;
+            this._rawInfo = decoded.raw;
 
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    this.image = img;
-                    this.imageWidth = img.naturalWidth;
-                    this.imageHeight = img.naturalHeight;
-
-                    document.getElementById('drop-zone').style.display = 'none';
-                    document.getElementById('main-canvas').style.display = 'block';
-
-                    document.querySelectorAll('.toolbar button').forEach(b => b.disabled = false);
-
-                    this.glEngine.loadImage(img);
-                    this._fitCanvas();
-                    this._reset();
-                    this._render();
-
-                    document.querySelector('.editor-layout').classList.add('has-image');
-                    resolve();
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        });
+            document.getElementById('drop-zone').style.display = 'none';
+            document.getElementById('main-canvas').style.display = 'block';
+            document.querySelectorAll('.toolbar button').forEach(b => b.disabled = false);
+            this._fitCanvas();
+            this._reset();
+            this._render();
+            document.querySelector('.editor-layout').classList.add('has-image');
+            this._importStatus(decoded.raw
+                ? `CR3 developed locally · ${this.imageWidth} × ${this.imageHeight}${decoded.raw.halfSize ? ' · ½-size development' : ' · full resolution'} · editable 8-bit sRGB, original RAW unchanged`
+                : `${this.imageWidth} × ${this.imageHeight} · ready`);
+            return true;
+        } catch (error) {
+            if (decoded?.image !== this.image) ImageImport.release(decoded?.image);
+            if (this._importController === controller) this._importStatus(
+                error.name === 'AbortError' ? 'Import cancelled. Previous photo unchanged.' : error.message, error.name !== 'AbortError');
+            return false;
+        } finally {
+            if (this._importController === controller) {
+                document.getElementById('import-cancel').hidden = true;
+                this._importController = null;
+            }
+        }
     }
 
     _fitCanvas() {
@@ -2390,6 +2428,7 @@ class CropTool {
         this.app._pushHistory();
         this.app._preCropHistoryIndex = this.app.historyIndex;
         this.app._preCropSnapshot = this.app.history[this.app.historyIndex];
+        if (this.app._preCropImage !== this.app.image) ImageImport.release(this.app._preCropImage);
         this.app._preCropImage = this.app.image;
         this.app._preCropWidth = this.app.imageWidth;
         this.app._preCropHeight = this.app.imageHeight;
@@ -2397,14 +2436,8 @@ class CropTool {
         const iw = this.app.imageWidth;
         const ih = this.app.imageHeight;
 
-        // Cap working resolution to avoid canvas size limits
-        const maxDim = 4096;
-        let workW = iw, workH = ih;
-        if (workW > maxDim || workH > maxDim) {
-            const s = maxDim / Math.max(workW, workH);
-            workW = Math.round(workW * s);
-            workH = Math.round(workH * s);
-        }
+        // Crop in source coordinates, not the bounded interactive preview's pixels.
+        const workW = iw, workH = ih;
 
         const sx = Math.round(this.cropX * workW);
         const sy = Math.round(this.cropY * workH);
@@ -2439,8 +2472,12 @@ class CropTool {
         document.getElementById('mobile-crop-bar')?.classList.remove('visible');
 
         // Replace the app's source image
+        const sourceImage = this.app.image;
         const newImg = new Image();
+        let cropURL;
         newImg.onload = () => {
+            URL.revokeObjectURL(cropURL);
+            if (this.app.image !== sourceImage) return;
             this.app.image = newImg;
             this.app.imageWidth = newImg.width;
             this.app.imageHeight = newImg.height;
@@ -2461,7 +2498,20 @@ class CropTool {
 
             this.deactivate();
         };
-        newImg.src = out.toDataURL('image/png');
+        newImg.onerror = () => {
+            URL.revokeObjectURL(cropURL);
+            this.app._importStatus('The browser could not load this crop. Try a smaller crop or Smaller RAW.', true);
+        };
+        out.toBlob(blob => {
+            out.width = out.height = 1;
+            if (this.app.image !== sourceImage) return;
+            if (!blob) {
+                this.app._importStatus('The browser could not encode this crop. Try a smaller crop or Smaller RAW.', true);
+                return;
+            }
+            cropURL = URL.createObjectURL(blob);
+            newImg.src = cropURL;
+        }, 'image/png');
     }
 
     cancel() {
@@ -2557,7 +2607,7 @@ class Library {
 
     _isImageFile(name) {
         const ext = name.split('.').pop().toLowerCase();
-        return ['jpg','jpeg','png','webp','heic','tiff','tif','bmp','gif'].includes(ext) && !name.startsWith('.');
+        return ['jpg','jpeg','png','webp','heic','tiff','tif','bmp','gif','cr3'].includes(ext) && !name.startsWith('.');
     }
 
     _bindEvents() {
@@ -2598,16 +2648,22 @@ class Library {
     }
 
     async _scanFolder() {
-        if (!this.dirHandle) return;
+        if (!this.dirHandle || this._adding) return;
 
         try {
             const perm = await this.dirHandle.requestPermission({ mode: 'readwrite' });
             if (perm !== 'granted') return;
         } catch (e) { return; }
 
+        this._adding = true;
+        const controller = this._importController = new AbortController();
+        document.getElementById('import-cancel').hidden = false;
+        let folderError = '';
+        try {
         const existing = new Set(this.photos.map(p => p.name));
 
         for await (const entry of this.dirHandle.values()) {
+            if (controller.signal.aborted) break;
             if (entry.kind !== 'file') continue;
             if (!this._isImageFile(entry.name)) continue;
             if (entry.name.endsWith('.ABEL.json')) continue;
@@ -2627,8 +2683,13 @@ class Library {
             let thumbUrl = '';
             try {
                 const file = await fileHandle.getFile();
-                thumbUrl = await this._generateThumb(file);
-            } catch (e) { continue; }
+                thumbUrl = await this._generateThumb(file, controller.signal);
+            } catch (e) {
+                folderError = `${entry.name}: ${e.message}`;
+                this.app._importStatus(`${entry.name}: ${e.message}`, true);
+                if (e.name === 'AbortError') break;
+                continue;
+            }
 
             this.photos.push({ id, name: entry.name, fileHandle, thumbUrl, hasEdits });
         }
@@ -2648,6 +2709,13 @@ class Library {
 
         if (this.photos.length > 1 && !this.isOpen) {
             document.getElementById('filmstrip').style.display = '';
+        }
+        this.app._importStatus(controller.signal.aborted ? 'Folder import cancelled.'
+            : folderError || 'Folder import complete.', !!folderError);
+        } finally {
+            this._adding = false;
+            this._importController = null;
+            if (!this.app._importController) document.getElementById('import-cancel').hidden = true;
         }
     }
 
@@ -2673,13 +2741,30 @@ class Library {
         document.getElementById('btn-library').style.color = '';
     }
 
-    async addFiles(files) {
+    async addFiles(files, readyThumb) {
+        if (this._adding) return;
+        this._adding = true;
+        const controller = this._importController = new AbortController();
+        document.getElementById('import-cancel').hidden = false;
+        let failed = 0;
+        let lastError = '';
+        try {
         for (const file of files) {
-            if (!file.type.startsWith('image/')) continue;
+            if (!RawPolicy.isImage(file)) continue;
+            if (controller.signal.aborted) break;
             const id = this._photoId(file);
             if (this.photos.find(p => p.id === id)) continue;
 
-            const thumbUrl = await this._generateThumb(file);
+            let thumbUrl;
+            try {
+                thumbUrl = readyThumb || await this._generateThumb(file, controller.signal);
+            } catch (error) {
+                if (error.name === 'AbortError') break;
+                failed++;
+                lastError = error.message;
+                this.app._importStatus(`${file.name}: ${error.message}`, true);
+                continue;
+            }
             this.photos.push({ id, name: file.name, file, thumbUrl, hasEdits: false });
 
             if (this.db) {
@@ -2707,51 +2792,52 @@ class Library {
         if (this.photos.length > 1) {
             document.getElementById('filmstrip').style.display = this.isOpen ? 'none' : '';
         }
+        if (controller.signal.aborted) this.app._importStatus('Library import cancelled.');
+        else if (!readyThumb && !this.app._importController) this.app._importStatus(
+            failed ? `Library: ${failed} files could not be decoded. ${lastError}` : 'Library import complete.', failed > 0);
+        } finally {
+            this._adding = false;
+            this._importController = null;
+            if (!this.app._importController) document.getElementById('import-cancel').hidden = true;
+        }
     }
 
-    async _generateThumb(file) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const size = 200;
-                    const canvas = document.createElement('canvas');
-                    canvas.width = size;
-                    canvas.height = size;
-                    const ctx = canvas.getContext('2d');
-                    const scale = Math.max(size / img.width, size / img.height);
-                    const w = img.width * scale;
-                    const h = img.height * scale;
-                    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-                    resolve(canvas.toDataURL('image/jpeg', 0.7));
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        });
+    async _generateThumb(file, signal) {
+        const { image } = await ImageImport.decode(file, { signal, halfSize: true, thumbnail: true,
+            onStatus: text => this.app._importStatus(`${file.name}: ${text}`) });
+        try { return ImageImport.thumb(image); }
+        finally { ImageImport.release(image); }
     }
 
     async openPhoto(index) {
         if (index < 0 || index >= this.photos.length) return;
+        const request = this._openRequest = (this._openRequest || 0) + 1;
 
         await this._saveCurrentEdits();
 
-        this.activeIndex = index;
         const photo = this.photos[index];
 
         this.close();
 
         // Get the actual File object
         let file;
-        if (photo.fileHandle) {
-            file = await photo.fileHandle.getFile();
-        } else {
-            file = photo.file;
+        try {
+            if (photo.fileHandle) {
+                file = await photo.fileHandle.getFile();
+            } else {
+                file = photo.file;
+            }
+        } catch (error) {
+            this.app._importStatus(`Cannot read this library photo: ${error.message}`, true);
+            return;
         }
 
-        await this.app._loadFile(file);
-        await this._restoreEdits(photo);
+        const editData = await this._readEdits(photo);
+        if (request !== this._openRequest) return;
+        const loaded = await this.app._loadFile(file, { halfSize: editData?.rawHalfSize });
+        if (!loaded || request !== this._openRequest) return;
+        this.activeIndex = index;
+        await this._restoreEdits(photo, editData);
         this._renderFilmstrip();
         this._renderGrid();
     }
@@ -2762,6 +2848,7 @@ class Library {
         if (!photo) return;
 
         const editData = {
+            rawHalfSize: this.app._rawInfo?.halfSize,
             state: JSON.parse(JSON.stringify(this.app.state)),
             masks: this.app.maskEngine.masks.map(m => ({
                 type: m.type,
@@ -2800,7 +2887,7 @@ class Library {
         }
     }
 
-    async _restoreEdits(photo) {
+    async _readEdits(photo) {
         let editData = null;
 
         // Try loading from sidecar file first (FS Access)
@@ -2825,6 +2912,11 @@ class Library {
             });
         }
 
+        return editData;
+    }
+
+    async _restoreEdits(photo, editData) {
+        if (editData === undefined) editData = await this._readEdits(photo);
         if (editData && editData.state) {
             this.app.state = { ...this.app._defaultState(), ...editData.state };
             this.app._syncSlidersFromState();
@@ -2875,6 +2967,8 @@ class Library {
     }
 
     clearAll() {
+        this._importController?.abort();
+        this._openRequest = (this._openRequest || 0) + 1;
         this.photos = [];
         this.activeIndex = -1;
         this.dirHandle = null;
@@ -2985,7 +3079,7 @@ class BatchProcessor {
             dropArea.addEventListener(evt, (e) => { e.preventDefault(); dropArea.classList.remove('drag-over'); });
         });
         dropArea.addEventListener('drop', (e) => {
-            const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+            const imageFiles = Array.from(e.dataTransfer.files).filter(f => RawPolicy.isImage(f));
             if (imageFiles.length) this.addFiles(imageFiles);
         });
     }
@@ -3005,24 +3099,30 @@ class BatchProcessor {
     }
 
     hide() {
-        if (this.processing) return; // don't close while processing
+        if (this.processing) {
+            this._cancelled = true;
+            this._controller?.abort();
+            return;
+        }
         document.getElementById('batch-modal').classList.remove('visible');
     }
 
     addFiles(newFiles) {
+        if (this.processing) return;
         for (const file of newFiles) {
-            if (!file.type.startsWith('image/')) continue;
+            if (!RawPolicy.isImage(file)) continue;
             if (this.files.find(f => f.file.name === file.name && f.file.size === file.size)) continue;
-            this.files.push({
+            const item = {
                 file,
                 status: 'pending', // pending | processing | done | error
                 thumb: null,
-            });
+            };
+            this.files.push(item);
             // Generate thumbnail
-            const idx = this.files.length - 1;
+            if (RawPolicy.isCandidate(file)) continue; // Sensor decode happens once, during processing.
             const reader = new FileReader();
             reader.onload = (e) => {
-                this.files[idx].thumb = e.target.result;
+                item.thumb = e.target.result;
                 this._renderList();
             };
             reader.readAsDataURL(file);
@@ -3063,6 +3163,7 @@ class BatchProcessor {
             else if (item.status === 'processing') status.textContent = '⚙️';
             else if (item.status === 'done') status.textContent = '✅';
             else if (item.status === 'error') status.textContent = '❌';
+            if (item.error) { status.title = item.error; status.textContent = `❌ ${item.error}`; }
 
             const removeBtn = document.createElement('button');
             removeBtn.className = 'batch-item-remove';
@@ -3097,6 +3198,8 @@ class BatchProcessor {
     async processAll() {
         if (this.files.length === 0 || this.processing) return;
         this.processing = true;
+        this._cancelled = false;
+        this._controller = new AbortController();
         this.processedBlobs = [];
 
         const startBtn = document.getElementById('batch-start');
@@ -3123,6 +3226,7 @@ class BatchProcessor {
         }
 
         for (let i = 0; i < this.files.length; i++) {
+            if (this._cancelled) break;
             const item = this.files[i];
             item.status = 'processing';
             this._renderList();
@@ -3136,6 +3240,7 @@ class BatchProcessor {
             } catch (e) {
                 console.error('Batch error:', item.file.name, e);
                 item.status = 'error';
+                item.error = e.message;
             }
             this._renderList();
         }
@@ -3145,7 +3250,7 @@ class BatchProcessor {
 
         const doneCount = this.files.filter(f => f.status === 'done').length;
         const errCount = this.files.filter(f => f.status === 'error').length;
-        this._setStatus(`Done! ${doneCount} photos processed${errCount ? `, ${errCount} errors` : ''}.`);
+        this._setStatus(`${this._cancelled ? 'Cancelled.' : 'Done!'} ${doneCount} photos processed${errCount ? `, ${errCount} errors` : ''}.`);
 
         this.processing = false;
         startBtn.style.display = 'none';
@@ -3157,23 +3262,26 @@ class BatchProcessor {
         return `${base}_ABEL.${format}`;
     }
 
-    _processOneImage(file, batchGL, offCanvas, mimeType, quality, format) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onerror = reject;
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onerror = reject;
-                img.onload = () => {
+    async _processOneImage(file, batchGL, offCanvas, mimeType, quality, format) {
+        const { image: img } = await ImageImport.decode(file, {
+            signal: this._controller?.signal,
+            halfSize: document.getElementById('raw-half-size').checked,
+            onStatus: text => this._setStatus(`${file.name}: ${text}`),
+        });
+        try {
+            const item = this.files.find(item => item.file === file);
+            if (item) { item.thumb = ImageImport.thumb(img); this._renderList(); }
+            return await new Promise((resolve, reject) => {
                     try {
                         // Load into GL
                         batchGL.loadImage(img);
 
                         // Analyze and auto-edit
                         const maxDim = 600;
-                        const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
-                        const sw = Math.round(img.naturalWidth * scale);
-                        const sh = Math.round(img.naturalHeight * scale);
+                        const width = img.naturalWidth || img.width, height = img.naturalHeight || img.height;
+                        const scale = Math.min(1, maxDim / Math.max(width, height));
+                        const sw = Math.round(width * scale);
+                        const sh = Math.round(height * scale);
                         const tmpCanvas = document.createElement('canvas');
                         tmpCanvas.width = sw;
                         tmpCanvas.height = sh;
@@ -3235,11 +3343,8 @@ class BatchProcessor {
                     } catch (err) {
                         reject(err);
                     }
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        });
+            });
+        } finally { ImageImport.release(img); }
     }
 
     async downloadZip() {

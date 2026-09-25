@@ -1,0 +1,52 @@
+ABEL local Canon CR3 decoder
+
+libraw-wasm-nothread 1.6.0-nothread.1, ISC license (LICENSE).
+Copyright ybouane and contributors; copyright 2026 Oscar Gallego Ruiz.
+Unmodified npm distribution libraw.js and libraw.wasm, pinned by package-lock.json
+and integrity.json. Reproduce the vendor copy with npm ci && npm run vendor:raw.
+Source and build configuration:
+https://github.com/garbarok/libraw-wasm-nothread
+https://www.npmjs.com/package/libraw-wasm-nothread/v/1.6.0-nothread.1
+Upstream wrapper: https://github.com/ybouane/LibRaw-Wasm/tree/v1.6.0
+
+LibRaw 0.22.1: distributed under CDDL 1.0 (LICENSE.CDDL and COPYRIGHT).
+The unmodified library's complete corresponding source, including its embedded
+third-party notices and build files, is available at:
+https://github.com/LibRaw/LibRaw/tree/0.22.1
+https://github.com/LibRaw/LibRaw/archive/refs/tags/0.22.1.tar.gz
+No LibRaw source modifications by ABEL. The wrapper's compileLibraw.sh documents
+the Emscripten configuration. ABEL's raw-worker.js is separate JavaScript.
+Embedded BSD notices: LICENSE-LIBRAW-NOTICES.
+
+The pieces from Adobe DNG SDK 1.4 identified in LibRaw's COPYRIGHT are MIT licensed:
+Copyright (c) 2005 Adobe Systems Incorporated
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to
+do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Little CMS 2.19.1, MIT license (LICENSE-LCMS).
+Source: https://github.com/mm2/Little-CMS/tree/lcms2.19.1
+
+Emscripten 5.0.7 runtime (LICENSE-EMSCRIPTEN) and ports used by the upstream build:
+Independent JPEG Group jpeg-9f (LICENSE-JPEG).
+This software is based in part on the work of the Independent JPEG Group.
+Source: https://www.ijg.org/files/jpegsrc.v9f.tar.gz
+libpng 1.6.55 (LICENSE-PNG):
+https://github.com/pnggroup/libpng/tree/v1.6.55
+zlib 1.3.1 (LICENSE-ZLIB):
+https://github.com/madler/zlib/tree/v1.3.1
+
+The bundled software is supplied without warranty; see the licenses.
+No photo is transmitted by the decoder. All assets are served from ABEL's origin.

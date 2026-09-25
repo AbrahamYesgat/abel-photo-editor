@@ -1,0 +1,9 @@
+{
+  "package": "libraw-wasm-nothread",
+  "version": "1.6.0-nothread.1",
+  "files": {
+    "libraw.js": "3de7193a9b1cbaafb118a4d9c14a63e3c7500e74378ac64d7858b59c09fe2805",
+    "libraw.wasm": "952ad840b341a420d0433979820917bca3716c3d51eefd091c7a1011c84995f4",
+    "LICENSE": "89ed72df6b5aadc6a6db4a0e45dd4e06602c4b56173d299f36064b3d9b2abff2"
+  }
+}

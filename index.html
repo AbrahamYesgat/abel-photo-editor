@@ -40,7 +40,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Import
         </button>
-        <input type="file" id="file-input" accept="image/*" hidden>
+        <input type="file" id="file-input" accept="image/*,.cr3,.CR3,image/x-canon-cr3,image/canon-cr3" hidden>
         <button id="btn-library" title="Photo Library">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             Library
@@ -95,6 +95,11 @@
 
     <!-- Canvas Area -->
     <section class="canvas-area">
+        <div class="import-controls">
+            <label title="Develop CR3 at half width and height (one quarter of the pixels). Reimport to change."><input id="raw-half-size" type="checkbox"> Smaller RAW (½ size)</label>
+            <span id="import-status" role="status" aria-live="polite">JPEG, PNG, WebP &amp; Canon CR3 · local editing</span>
+            <button id="import-cancel" type="button" hidden>Cancel import</button>
+        </div>
         <div class="canvas-container" id="canvas-container">
             <canvas id="main-canvas"></canvas>
             <canvas id="mask-overlay" style="display:none;"></canvas>
@@ -142,7 +147,7 @@
                 <h2>Library</h2>
                 <div class="library-actions">
                     <button class="btn btn-accent" id="lib-import-btn">Open Folder</button>
-                    <input type="file" id="lib-file-input" accept="image/*" multiple hidden>
+                    <input type="file" id="lib-file-input" accept="image/*,.cr3,.CR3,image/x-canon-cr3,image/canon-cr3" multiple hidden>
                     <button class="btn btn-outline" id="lib-refresh-btn" title="Re-scan folder">↻ Refresh</button>
                     <button class="btn btn-outline" id="lib-clear-btn">Clear</button>
                 </div>
@@ -459,7 +464,7 @@
         <p class="batch-desc">Select multiple photos to auto-enhance and download as a ZIP.</p>
 
         <div class="batch-import-area" id="batch-drop">
-            <input type="file" id="batch-file-input" accept="image/*" multiple hidden>
+            <input type="file" id="batch-file-input" accept="image/*,.cr3,.CR3,image/x-canon-cr3,image/canon-cr3" multiple hidden>
             <button class="btn btn-accent" id="batch-select-btn">Select Photos</button>
             <span class="batch-hint">or drag & drop</span>
         </div>
@@ -514,7 +519,9 @@
 <script src="js/review-json.js"></script>
 <script src="js/review-manual.js?v=intensities-1"></script>
 <script src="js/review.js?v=single-canvas-1"></script>
-<script src="js/app.js?v=single-canvas-1"></script>
+<script src="js/raw-policy.js?v=cr3-1"></script>
+<script src="js/image-import.js?v=cr3-1"></script>
+<script src="js/app.js?v=cr3-1"></script>
 
 <script>
     document.getElementById('export-quality').addEventListener('input', function() {

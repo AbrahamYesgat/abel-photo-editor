@@ -2,6 +2,29 @@
 
 A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Azure OpenAI**, **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent (plus current clarity only when explicitly enabled). Azure forwards these to your Microsoft Azure OpenAI deployment; Gemini forwards them to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
 
+## Canon CR3 RAW photos
+
+**Import a `.CR3` file just like a JPEG**, using Import, drag-and-drop, Library (including Open Folder), or Batch. Uppercase extensions and files without an image MIME type are supported. ABEL validates the Canon container and **develops the actual sensor data**, not its embedded JPEG preview. No photo leaves the browser; neither Azure nor a running Mac is needed for RAW import.
+
+- LibRaw 0.22.1 performs demosaicing, camera white balance, sRGB color conversion and sRGB tone encoding. The result enters ABEL's existing **8-bit RGB** editor. Exposure, color, masks, crop, undo, AI review and JPEG/PNG/WebP export work on this developed image. This is **not a full-precision, parametric RAW developer**: subsequent white-balance/exposure changes are RGB adjustments, not sensor-level recovery. The initial rendering can differ from Canon's JPEG.
+- **Smaller RAW (½ size)** develops at half width and height (one quarter of the output pixels). It is checked by default on mobile/low-memory devices and always visible before import. Uncheck before importing for full resolution where memory permits. The status displays the actual developed dimensions; exports use that resolution, never the reduced interactive preview. Saved library edits remember the development size. Reimport the original to choose another size.
+- Desktop limits: **100 MiB input**, 64-megapixel sensor, estimated 1.5 GiB working budget. Mobile/low-memory limits: **60 MiB input**, the same sensor ceiling, estimated 512 MiB budget. RAW workers have hard WASM heap ceilings of 1 GiB/384 MiB respectively and a two-minute timeout. Large full-resolution mobile imports are rejected with a Smaller RAW instruction, never silently resized. Limits are conservative estimates, not a guarantee against browser/OS memory pressure; close other tabs or use a desktop for large files.
+- One RAW decoder runs at a time in a dedicated worker. Input and bitmap output are transferred, not base64-encoded. Cancel import, replacing the photo, failure, timeout or leaving the page releases that job's worker; library imports are serial and batch cancellation stops decoding. The original `.CR3` stays unchanged. Library folder saves write only `.ABEL.json` sidecars. Exports are developed images, **not `.CR3` files**, and do not copy source EXIF/GPS.
+- Compatibility depends on LibRaw's camera/variant support. Canon EOS R RAW and EOS M50 C-RAW are tested; this is not a promise of every Canon model, Dual Pixel variant or future CR3 revision. Corrupt, unsupported and over-budget inputs display an explicit error and keep the previous photo. Current browsers with WebAssembly SIMD, module Workers and ImageBitmap are required. Physical iOS/Safari memory limits have not been certified.
+
+The self-hosted decoder is **`libraw-wasm-nothread@1.6.0-nothread.1`** (~1.4 MB WASM), pinned by npm lockfile and SHA-256 vendor manifest. The single-thread build runs in our worker without SharedArrayBuffer or cross-origin isolation, including GitHub Pages project paths. There is no runtime npm/CDN dependency. `npm ci --ignore-scripts && npm run vendor:raw` reproducibly verifies/copies the committed assets. Licenses, attribution and corresponding source links are in [`js/vendor/libraw/NOTICE.txt`](js/vendor/libraw/NOTICE.txt).
+
+RAW validation (no model calls; fixtures are CC0 and are **not committed/deployed**):
+
+```sh
+npm test
+node scripts/fetch-cr3-fixtures.cjs
+# Set PLAYWRIGHT_MODULE if Playwright is installed outside the project.
+node scripts/check-cr3.cjs
+```
+
+The browser check uses checksum-verified raw.pixls.us samples #4611 (EOS R) and #2663 (EOS M50 C-RAW). EOS R produces **6742 × 4498 sensor-developed pixels** (6888 × 4546 sensor including margins), or 3371 × 2249 in Smaller RAW mode—not its 6720 × 4480 camera JPEG. Tests cover masked native export, RGB variation, crop/undo, library restoration, corrupt inputs, cancellation, and an EXIF-rotated copy with exactly one rotation. Mobile testing is Chromium emulation, not a physical iPhone certification.
+
 ## Three AI editing intensities, one review
 
 Every review produces **Refine**, **Balanced** (default), and **Expressive**, each with independent **Global** and **Adaptive** recipes: six model-authored alternatives in one response, sharing one critique and rating of the reviewed image.
@@ -73,7 +96,7 @@ node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync(".env.azure-
 az deployment group create -g abel-photo-review -n abel-review-infrastructure --mode Incremental \
   --template-file infra/azure.json --parameters @.azure-tools/deployment-parameters.json -o none
 rm .azure-tools/deployment-parameters.json
-git archive --format=zip --output=.azure-tools/abel-backend.zip HEAD package.json server js css index.html manifest.json
+git archive --format=zip --output=.azure-tools/abel-backend.zip HEAD package.json package-lock.json server js css index.html manifest.json
 az webapp deploy -g abel-photo-review -n abel-review-66c1d915 \
   --src-path .azure-tools/abel-backend.zip --type zip --clean true --restart true -o none
 ```

@@ -27,6 +27,9 @@ jobs:
           test -f _site/js/review-prompt.js
           test -f _site/js/review-json.js
           test -f _site/js/review-manual.js
+          test -f _site/js/raw-worker.js
+          test -f _site/js/vendor/libraw/libraw.wasm
+          test -f _site/js/vendor/libraw/LICENSE
       - uses: actions/upload-pages-artifact@v3
         with:
           path: '_site'

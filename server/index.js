@@ -21,11 +21,18 @@ const STATIC_FILES = new Map([
     ...['styles.css'].map(name => [`/css/${name}`, `css/${name}`]),
     ...['app.js', 'auto-edit.js', 'curve-editor.js', 'gl-engine.js', 'histogram.js',
         'mask-engine.js', 'presets.js', 'shaders.js', 'review-contract.js', 'review.js',
-        'review-prompt.js', 'review-json.js', 'review-manual.js']
-        .map(name => [`/js/${name}`, `js/${name}`])
+        'review-prompt.js', 'review-json.js', 'review-manual.js',
+        'raw-policy.js', 'raw-worker.js', 'image-import.js']
+        .map(name => [`/js/${name}`, `js/${name}`]),
+    ...['libraw.js', 'libraw.wasm', 'LICENSE', 'LICENSE.CDDL', 'COPYRIGHT',
+        'LICENSE-LCMS', 'NOTICE.txt', 'integrity.json', 'LICENSE-JPEG', 'LICENSE-PNG', 'LICENSE-ZLIB',
+        'LICENSE-EMSCRIPTEN', 'LICENSE-LIBRAW-NOTICES']
+        .map(name => [`/js/vendor/libraw/${name}`, `js/vendor/libraw/${name}`])
 ]);
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
+    '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
+    '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8',
+    '': 'text/plain; charset=utf-8', '.CDDL': 'text/plain; charset=utf-8' };
 
 class SafeError extends Error {
     constructor(status, code, message, retryAfter) {
