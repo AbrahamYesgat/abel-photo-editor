@@ -28,6 +28,8 @@ class App {
             whites: 0, blacks: 0, temperature: 0, tint: 0,
             vibrance: 0, saturation: 0, clarity: 0, dehaze: 0,
             sharpenAmount: 0,
+            noiseLuma: 0, noiseColor: 0,
+            motionAmount: 0, motionLength: 4, motionAngle: 0,
             vignetteAmount: 0, vignetteMidpoint: 50, vignetteFeather: 50,
             grainAmount: 0,
             hslHue: [0, 0, 0, 0, 0, 0, 0, 0],
@@ -161,6 +163,7 @@ class App {
         input.step = step;
         input.value = defaultVal;
         input.className = 'slider-input';
+        input.setAttribute('aria-label', label);
 
         // Double-click to reset
         input.addEventListener('dblclick', () => {
@@ -199,6 +202,12 @@ class App {
     }
 
     _onSliderChange(key, value, category) {
+        if (Object.hasOwn(NightTools.settings(), key)) {
+            if (!this.image || this.cropTool?.active || this._importController) return;
+            this._stopComparison();
+            if (this._nightGesture !== key) this._pushHistory();
+            this._nightGesture = key;
+        }
         if (category === 'hslHue' || category === 'hslSat' || category === 'hslLum') {
             const idx = parseInt(key.split('_')[1]);
             this.state[category][idx] = value;
@@ -226,7 +235,10 @@ class App {
     _historyDebounce = null;
     _debouncedHistoryPush() {
         clearTimeout(this._historyDebounce);
-        this._historyDebounce = setTimeout(() => this._pushHistory(), 500);
+        this._historyDebounce = setTimeout(() => {
+            this._pushHistory();
+            this._nightGesture = null;
+        }, 500);
     }
 
     _buildBasicPanel() {
@@ -352,6 +364,126 @@ class App {
     _buildDetailPanel() {
         const panel = document.getElementById('panel-detail');
         this._createSlider(panel, 'Sharpening', 'sharpenAmount', 0, 150, 1, 0);
+        const noise = document.createElement('section');
+        noise.id = 'night-denoise';
+        noise.innerHTML = '<h3>Denoise</h3><p class="panel-info">Grain and color speckles, not camera shake. Edge-aware smoothing can soften stars and fine texture.</p>';
+        panel.appendChild(noise);
+        this._createSlider(noise, 'Noise reduction — luminance', 'noiseLuma', 0, 100, 1, 0);
+        this._createSlider(noise, 'Noise reduction — color', 'noiseColor', 0, 100, 1, 0);
+        noise.appendChild(this._btn('Reset denoise', () => this._setNight({ noiseLuma: 0, noiseColor: 0 })));
+        const motion = document.createElement('section');
+        motion.id = 'night-motion';
+        motion.innerHTML = '<h3>Reduce motion blur · experimental</h3><p class="panel-info">For short, straight streaks only. Match their direction and distance, then raise Amount. This is deconvolution, not sharpening. Severe or uneven shake cannot reliably be repaired; halos and noise can increase. Intentional blur should stay off.</p>';
+        panel.appendChild(motion);
+        this._createSlider(motion, 'Motion blur — amount', 'motionAmount', 0, 100, 1, 0);
+        this._createSlider(motion, 'Streak distance (source pixels)', 'motionLength', 1, 12, 0.5, 4);
+        this._createSlider(motion, 'Streak direction (° clockwise)', 'motionAngle', 0, 180, 1, 0);
+        const note = document.createElement('p');
+        note.className = 'panel-info';
+        note.textContent = '0° = horizontal; 90° = vertical. Distance uses the developed photo’s pixels, including Smaller RAW. Fit previews can hide fine changes. Both tools run locally, before color edits, with no AI or uploads. Denoise is never enabled by Motion blur.';
+        motion.appendChild(note);
+        motion.appendChild(this._btn('Reset motion blur', () => this._setNight({
+            motionAmount: 0, motionLength: 4, motionAngle: 0
+        })));
+        const status = document.createElement('p');
+        status.id = 'night-status';
+        status.className = 'panel-info';
+        status.setAttribute('role', 'status');
+        panel.appendChild(status);
+        const inspector = document.createElement('details');
+        inspector.id = 'night-inspector';
+        inspector.innerHTML = '<summary>100% detail preview · night tools only</summary><p class="panel-info">One photo pixel per canvas pixel. Pick a position to inspect; lighting, masks and sharpening are excluded here. Hold Compare original to check the change.</p><canvas id="night-inspector-canvas" width="280" height="180" aria-label="Native-resolution night correction preview"></canvas>';
+        for (const [axis, label] of [['x', 'Horizontal position'], ['y', 'Vertical position']]) {
+            const row = document.createElement('label');
+            row.className = 'slider-row';
+            row.textContent = label;
+            const input = document.createElement('input');
+            input.type = 'range'; input.min = 0; input.max = 100; input.value = 50;
+            input.className = 'slider-input';
+            input.id = `night-inspector-${axis}`;
+            input.setAttribute('aria-label', label);
+            input.addEventListener('input', () => this._requestRender());
+            row.appendChild(input);
+            inspector.appendChild(row);
+        }
+        const compare = this._btn('Compare original', () => {});
+        compare.id = 'night-inspector-compare';
+        compare.setAttribute('aria-label', 'Hold to compare original');
+        inspector.appendChild(compare);
+        this._bindHoldCompare(compare);
+        inspector.addEventListener('toggle', () => {
+            if (inspector.open) this._render();
+            else {
+                this._nightInspector?.engine.destroy();
+                this._nightInspector = null;
+            }
+        });
+        panel.appendChild(inspector);
+    }
+
+    _renderNightInspector(adj) {
+        const details = document.getElementById('night-inspector');
+        if (!details.open || !this.image) return;
+        const width = Math.min(280, details.clientWidth || 280, this.imageWidth);
+        const height = Math.min(180, this.imageHeight), pad = 30;
+        const x = Math.round((this.imageWidth - width) * Number(document.getElementById('night-inspector-x').value) / 100);
+        const y = Math.round((this.imageHeight - height) * Number(document.getElementById('night-inspector-y').value) / 100);
+        const key = `${x}:${y}:${width}:${height}`;
+        let inspector = this._nightInspector;
+        if (!inspector) {
+            inspector = this._nightInspector = {
+                engine: new GLEngine(document.getElementById('night-inspector-canvas'))
+            };
+        }
+        if (inspector.image !== this.image || inspector.key !== key) {
+            const sx = Math.max(0, x - pad), sy = Math.max(0, y - pad);
+            const source = document.createElement('canvas');
+            source.width = Math.min(this.imageWidth, x + width + pad) - sx;
+            source.height = Math.min(this.imageHeight, y + height + pad) - sy;
+            source.getContext('2d').drawImage(this.image, sx, sy, source.width, source.height,
+                0, 0, source.width, source.height);
+            inspector.engine.loadImage(source);
+            inspector.engine.setRenderSize(width, height);
+            inspector.engine.setRegion((x - sx) / source.width, (y - sy) / source.height,
+                width / source.width, height / source.height);
+            inspector.image = this.image;
+            inspector.key = key;
+            source.width = source.height = 1;
+        }
+        inspector.engine.renderComposite({ ...NightTools.settings(adj), showOriginal: adj.showOriginal }, []);
+    }
+
+    _updateNightButtons() {
+        const disabled = !this.image || !!this.cropTool?.active || !!this._importController || !!this._exporting;
+        for (const id of ['btn-denoise', 'btn-motion']) {
+            const button = document.getElementById(id);
+            if (button) button.disabled = disabled;
+        }
+        for (const key of Object.keys(NightTools.settings())) {
+            if (this.sliders[key]) this.sliders[key].input.disabled = disabled;
+        }
+    }
+
+    _openNight(section) {
+        if (!this.image || this.cropTool?.active || this._importController || this._exporting) return;
+        const selector = window.innerWidth <= 700 ? '.mobile-tab' : '.vtab';
+        document.querySelector(`${selector}[data-panel="detail"]`)?.click();
+        const element = document.getElementById(`night-${section}`);
+        element.scrollIntoView({ block: 'nearest' });
+        const key = section === 'motion' ? 'motionAmount' : 'noiseLuma';
+        this.sliders[key].input.focus({ preventScroll: true });
+    }
+
+    _setNight(changes) {
+        if (!this.image || this.cropTool?.active || this._importController || this._exporting) return;
+        this._stopComparison();
+        clearTimeout(this._historyDebounce);
+        this._pushHistory();
+        Object.assign(this.state, changes);
+        this._syncSlidersFromState();
+        this.review?.invalidate('Night correction changed. Review the current edit when ready.');
+        this._render();
+        this._pushHistory();
     }
 
     _buildEffectsPanel() {
@@ -755,6 +887,13 @@ class App {
         document.getElementById('btn-reset').addEventListener('click', () => this._reset());
         document.getElementById('btn-export').addEventListener('click', () => this._showExportModal());
         document.getElementById('btn-auto').addEventListener('click', () => this._autoEdit());
+        document.getElementById('btn-denoise').addEventListener('click', () => {
+            this._setNight({ noiseLuma: Math.max(this.state.noiseLuma || 0, 60),
+                noiseColor: Math.max(this.state.noiseColor || 0, 70) });
+            this._openNight('denoise');
+        });
+        document.getElementById('btn-motion').addEventListener('click', () => this._openNight('motion'));
+        this._updateNightButtons();
 
         // Before/After
         const baBtn = document.getElementById('btn-before-after');
@@ -764,6 +903,7 @@ class App {
         const canvas = document.getElementById('main-canvas');
         this._bindHoldCompare(canvas, true, true);
         window.addEventListener('blur', () => this._stopComparison());
+        window.addEventListener('pagehide', () => this._exportController?.abort());
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) this._stopComparison();
         });
@@ -775,7 +915,10 @@ class App {
         canvas.addEventListener('touchend', () => this._canvasPointerUp());
 
         // Export modal
-        document.getElementById('export-cancel').addEventListener('click', () => this._hideExportModal());
+        document.getElementById('export-cancel').addEventListener('click', () => {
+            if (this._exportController) this._exportController.abort();
+            else this._hideExportModal();
+        });
         document.getElementById('export-confirm').addEventListener('click', () => this._doExport());
         document.getElementById('export-format').addEventListener('change', (e) => {
             const isPng = e.target.value === 'png' || e.target.value === 'tiff-png';
@@ -1000,7 +1143,7 @@ class App {
         this._comparisonMasks = this._comparisonState ? this.review.beforeMasks : null;
         this.showingOriginal = !this._comparisonState;
         const label = document.getElementById('compare-label');
-        label.textContent = this._comparisonState ? 'Before review' : 'Original lighting and color';
+        label.textContent = this._comparisonState ? 'Before review' : 'Original photo';
         label.hidden = false;
         document.getElementById('mask-overlay').style.display = 'none';
         this._render();
@@ -1098,8 +1241,10 @@ class App {
     }
 
     async _loadFile(file, options = {}) {
+        this._exportController?.abort();
         this._importController?.abort();
         const controller = this._importController = new AbortController();
+        this._updateNightButtons();
         this._stopComparison();
         if (this.review) this.review.elements.consent.checked = false;
         this.review?.invalidate('Loading a new photo. Review it once it is ready.');
@@ -1144,6 +1289,7 @@ class App {
             if (this._importController === controller) {
                 document.getElementById('import-cancel').hidden = true;
                 this._importController = null;
+                this._updateNightButtons();
             }
         }
     }
@@ -1264,7 +1410,18 @@ class App {
         const masksWithAdj = (this._comparisonMasks || this.maskEngine.masks).filter(m =>
             m.visible && Object.values(m.adjustments).some(v => v !== 0)
         );
-        this.glEngine.renderComposite(adj, masksWithAdj);
+        try {
+            this.glEngine.renderComposite(adj, masksWithAdj);
+            this._renderNightInspector(adj);
+            const status = document.getElementById('night-status');
+            if (status) status.textContent = '';
+        } catch (error) {
+            const status = document.getElementById('night-status');
+            if (status) status.textContent = `Preview failed: ${error.message} Your settings are retained; undo or reset the night tools.`;
+            this._importStatus(`Preview failed: ${error.message}`, true);
+            return;
+        }
+        this._updateNightButtons();
         this._scheduleHistogramUpdate();
     }
 
@@ -1752,6 +1909,23 @@ class App {
         }
     }
 
+    async _exportCanvasAsync(scale = 1, options = {}) {
+        const source = this.image;
+        const state = JSON.parse(JSON.stringify(this.state));
+        const masks = this.maskEngine.captureMasks().filter(mask =>
+            mask.visible && Object.values(mask.adjustments).some(value => value !== 0));
+        const canvas = document.createElement('canvas');
+        const engine = new GLEngine(canvas);
+        try {
+            engine.updateCurveLUT(this.curveEditor.getLUT());
+            return await engine.exportImageAsync(source, { ...state, showOriginal: false }, masks, scale, options);
+        } finally {
+            engine.destroy();
+            engine.gl.getExtension('WEBGL_lose_context')?.loseContext();
+            canvas.width = canvas.height = 1;
+        }
+    }
+
     _doExport() {
         if (this._exporting) return;
         if (this.review?._applyFrame) this.review.apply();
@@ -1772,6 +1946,7 @@ class App {
             this._exporting = false;
             btn.disabled = false;
             btn.textContent = 'Download';
+            this._updateNightButtons();
             if (!blob) {
                 alert('Export failed — could not generate image.');
                 return;
@@ -1786,18 +1961,33 @@ class App {
             // AI super-resolution export
             this._aiUpscaleExport(scale, mimeType, quality, onBlob, btn);
         } else {
-            try {
-                const output = this._exportCanvas(scale);
+            const controller = this._exportController = new AbortController();
+            const cancel = document.getElementById('export-cancel');
+            cancel.textContent = 'Cancel export';
+            this._updateNightButtons();
+            this._exportCanvasAsync(scale, {
+                signal: controller.signal,
+                onProgress: progress => { btn.textContent = `Exporting ${Math.round(progress * 100)}%`; }
+            }).then(output => {
+                btn.textContent = 'Encoding…';
                 output.toBlob(blob => {
                     output.width = output.height = 1;
+                    if (controller.signal.aborted) { finish(); return; }
+                    finish();
                     onBlob(blob);
                 }, mimeType, quality);
-            } catch (error) {
+            }).catch(error => {
+                finish();
+                if (error.name !== 'AbortError') alert(`Export failed: ${error.message}`);
+            });
+            const finish = () => {
+                this._exportController = null;
                 this._exporting = false;
                 btn.disabled = false;
                 btn.textContent = 'Download';
-                alert(`Export failed: ${error.message}`);
-            }
+                cancel.textContent = 'Cancel';
+                this._updateNightButtons();
+            };
         }
     }
 
@@ -2101,6 +2291,7 @@ class CropTool {
     activate() {
         if (!this.app.image) return;
         this.active = true;
+        this.app._updateNightButtons();
         this.app.review?.updateButtons();
         this.rotation = 0;
         this.cropX = 0; this.cropY = 0;
@@ -2136,6 +2327,7 @@ class CropTool {
 
     deactivate() {
         this.active = false;
+        this.app._updateNightButtons();
         this.app.review?.updateButtons();
         this.overlay.classList.remove('active');
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
@@ -2473,14 +2665,18 @@ class CropTool {
 
         // Replace the app's source image
         const sourceImage = this.app.image;
+        const sourceRotation = this.rotation;
         const newImg = new Image();
         let cropURL;
         newImg.onload = () => {
             URL.revokeObjectURL(cropURL);
             if (this.app.image !== sourceImage) return;
             this.app.image = newImg;
+            this.app._exportController?.abort();
             this.app.imageWidth = newImg.width;
             this.app.imageHeight = newImg.height;
+            this.app.state.motionAngle = ((this.app.state.motionAngle || 0) + sourceRotation + 180) % 180;
+            this.app._syncSlidersFromState();
             this.app.glEngine.loadImage(newImg);
             this.app._fitCanvas();
             this.app._hideCompositeOverlay();

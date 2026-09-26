@@ -55,7 +55,7 @@
     --border: #2a2a2a;
     --border-subtle: #222222;
     --panel-width: 320px;
-    --toolbar-height: 40px;
+    --toolbar-height: 44px;
     --radius: 4px;
     --radius-sm: 3px;
     --transition: 0.12s ease;
@@ -301,7 +301,8 @@ html, body {
     flex: 1;
     position: relative;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     justify-content: center;
     background: var(--bg-canvas);
     overflow: hidden;
@@ -409,6 +410,8 @@ html, body {
     justify-content: center;
     width: 100%;
     height: 100%;
+    flex: 1;
+    min-height: 0;
 }
 
 #main-canvas {
@@ -1784,4 +1787,35 @@ html, body {
 @media (max-width: 700px) {
     .review-view-photo:not([hidden]) { display: block; width: 100%; }
     .editor-layout:has(.sidebar-right.mobile-open) .review-photo-controls { display: none; }
+}
+
+/* Keep both local restoration tools reachable without squeezing touch targets. */
+.toolbar button { min-height: 44px; }
+#btn-denoise, #btn-motion { min-width: 44px; font-size: 11px; }
+#night-denoise, #night-motion { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+#panel-detail .btn { min-height: 44px; }
+#night-status:not(:empty) { color: #f4ad8d; }
+#night-inspector { margin-top: 18px; }
+#night-inspector summary { cursor: pointer; min-height: 44px; padding: 12px 0; }
+#night-inspector-canvas { display: block; max-width: 100%; margin: 8px auto; }
+#night-inspector .slider-row { display: block; }
+#night-denoise .slider-input, #night-motion .slider-input, #night-inspector .slider-input {
+    height: 44px;
+    background: linear-gradient(var(--slider-track), var(--slider-track)) center / 100% 4px no-repeat;
+}
+#night-denoise .slider-input:focus-visible, #night-motion .slider-input:focus-visible,
+#night-inspector .slider-input:focus-visible { outline: 2px solid var(--text-secondary); }
+@media (max-width: 1100px) {
+    :root { --toolbar-height: 88px; }
+    .toolbar { flex-wrap: wrap; height: calc(88px + env(safe-area-inset-top, 0px)); }
+    .toolbar-left, .toolbar-right { height: 44px; }
+    .toolbar-center { order: 3; width: 100%; height: 44px; justify-content: center; }
+    .toolbar-center button { min-width: 44px; }
+    .toolbar-center .separator { display: none; }
+}
+@media (max-width: 700px) {
+    .editor-layout { height: calc(100% - 88px - env(safe-area-inset-top, 0px)); }
+    .toolbar-center { gap: 4px; }
+    .toolbar-center #btn-auto, #btn-denoise, #btn-motion { font-size: 11px; padding: 6px 8px; }
+    .toolbar-left button, .toolbar-right button { min-width: 44px; justify-content: center; }
 }

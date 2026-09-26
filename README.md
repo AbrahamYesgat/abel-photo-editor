@@ -2,6 +2,31 @@
 
 A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Azure OpenAI**, **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent (plus current clarity only when explicitly enabled). Azure forwards these to your Microsoft Azure OpenAI deployment; Gemini forwards them to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
 
+## Night clean-up: grain and camera shake are different
+
+Two separate tools sit beside **Auto** (on small screens the editing buttons occupy a second toolbar row):
+
+- **Denoise** applies moderate, edge-aware luminance/color noise reduction in one undoable step. Repeated clicks do not stack it or reduce stronger existing noise settings. Adjust the two sliders in **Detail**, or **Reset denoise** without changing anything else. This smooths grain/speckles; it does **not** repair camera shake. Fine texture and small stars can be softened.
+- **Motion blur** opens **Reduce motion blur · experimental**, initially off. Match the streak **direction** (0° horizontal, 90° vertical, clockwise) and **distance** (1–12 developed-source pixels), then raise **Amount**. This is a finite, regularized **Wiener deconvolution** for a straight-line blur model—not an unsharp-mask/sharpening shortcut or a generative AI repair. It can improve mild, approximately uniform streaking. Wrong settings can create halos or amplify noise; severe, curved, rotational or spatially varying shake and missing detail cannot reliably be recovered. Leave intentional blur alone. Motion blur never enables Denoise automatically.
+
+Both run **inside the browser**, with no model download, photo upload, paid request or automatic application on import. They operate on the editor's developed **8-bit sRGB**, not linear sensor data; deconvolution is therefore an approximation to optical motion. The current AI review allowlists are unchanged—models cannot set these controls. A review you explicitly request still sees the current corrected edit.
+
+**100% detail preview** in Detail shows native-pixel samples of the selected image position, with *only* these two corrections, so a downscaled fit preview cannot hide their effect. Use its position sliders and hold **Compare original**. The main canvas still shows the complete edit. Undo/redo, source comparison, saved library edits, crop and native-resolution PNG/JPEG/WebP export retain the settings. A crop rotation rotates the streak direction; distance remains in the developed image's pixels (including explicit Smaller RAW imports), not screen pixels.
+
+Implementation: a 5×5 bilateral filter separates luminance and chroma strengths, followed—only if enabled—by a pixel-integrated line-PSF inverse with regularization 0.08, a windowed ±24-sample support and normalized DC response. Restoration is cached once per source/settings change and shared by mask layers, before existing color/detail adjustments. Native export includes the complete inverse/filter halo; it does not export the reduced preview. Normal Download uses a separate renderer and frozen edit snapshot, yields between 512px tiles, displays progress and offers **Cancel export**, without replacing the visible photo with partial tiles. Encoding may still take time after rendering; cancellation discards its result. No iterative CPU deconvolution or whole-photo readback runs during slider gestures. Export still has the existing final-canvas memory limits. These are bounded local tools, not guaranteed recovery; physical iOS/Safari performance is not certified.
+
+Validation uses synthetic noise and known horizontal/vertical motion, exact undo/redo/compare pixels, native export/tile seams, responsive controls and six-mask performance:
+
+```sh
+node --test test/night-tools.test.js
+node scripts/check-night-tools.cjs
+NIGHT_TOOLS=1 node scripts/check-mask-performance.cjs
+```
+
+Set `PLAYWRIGHT_MODULE` when Playwright is installed outside the project. These checks make no inference requests.
+
+Local headless Chromium measurements on the synthetic fixtures: luminance-channel noise variance fell to **23%** of baseline while preserving the test edge; seven-pixel horizontal/vertical blur MSE fell to **6%** of baseline at full correction. Native tiled output differed by at most **2/255** per channel from untiled rendering with denoise, motion, clarity and sharpening combined. These are controlled fixtures, **not recovery guarantees for real photos**. With a 24MP image and six masks, warmed interactive edits measured roughly **53–66 ms** and brush movement **29–45 ms**; cold rendering was slower. Full native export took about **45 seconds** on this test setup, now with progress and cancellation between tiles. Hardware, browser and photo size substantially affect timings.
+
 ## Canon CR3 RAW photos
 
 **Import a `.CR3` file just like a JPEG**, using Import, drag-and-drop, Library (including Open Folder), or Batch. Uppercase extensions and files without an image MIME type are supported. ABEL validates the Canon container and **develops the actual sensor data**, not its embedded JPEG preview. No photo leaves the browser; neither Azure nor a running Mac is needed for RAW import.

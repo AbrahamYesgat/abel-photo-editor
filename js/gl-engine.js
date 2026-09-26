@@ -75,6 +75,7 @@ class GLEngine {
         gl.compileShader(shader);
         if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
             const err = gl.getShaderInfoLog(shader);
+            gl.deleteShader(shader);
             console.error('Shader compile error:', err);
             throw new Error('Shader compilation failed: ' + err);
         }
@@ -126,6 +127,7 @@ class GLEngine {
 
     loadImage(img) {
         const gl = this.gl;
+        this._releaseNight();
         this._releaseComposite();
         gl.useProgram(this.program);
         this.imageWidth = img.naturalWidth || img.width;
@@ -158,6 +160,8 @@ class GLEngine {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+        this._sourceSize = [renderW, renderH];
+        this._sourceScale = [renderW / this.imageWidth, renderH / this.imageHeight];
         if (source !== img) source.width = source.height = 1;
 
         gl.uniform1i(this.uniforms.u_image, 0);
@@ -170,14 +174,19 @@ class GLEngine {
         this.setRegion(0, 0, 1, 1);
     }
 
-    loadExportTile(img) {
+    loadExportTile(img, adjustments = {}) {
         const gl = this.gl;
+        this._releaseNight();
         const [x, y, w, h] = this.region;
         const iw = this.imageWidth, ih = this.imageHeight;
-        // Neighbor padding preserves clarity/sharpening across tile boundaries.
-        const sx = Math.max(0, Math.floor(x * iw) - 4), sy = Math.max(0, Math.floor(y * ih) - 4);
-        const sw = Math.min(iw, Math.ceil((x + w) * iw) + 4) - sx;
-        const sh = Math.min(ih, Math.ceil((y + h) * ih) + 4) - sy;
+        // The finite inverse support + denoise + downstream detail taps, not
+        // just the forward blur length, determines the seam-free halo.
+        const night = NightTools.settings(adjustments);
+        const pad = 4 + (night.noiseLuma || night.noiseColor ? 2 : 0) +
+            (night.motionAmount ? NightTools.radius : 0);
+        const sx = Math.max(0, Math.floor(x * iw) - pad), sy = Math.max(0, Math.floor(y * ih) - pad);
+        const sw = Math.min(iw, Math.ceil((x + w) * iw) + pad) - sx;
+        const sh = Math.min(ih, Math.ceil((y + h) * ih) + pad) - sy;
         const tile = this._exportSource ||= document.createElement('canvas');
         const scale = Math.min(1, 2048 / Math.max(sw, sh), gl.getParameter(gl.MAX_TEXTURE_SIZE) / Math.max(sw, sh));
         tile.width = Math.max(1, Math.round(sw * scale)); tile.height = Math.max(1, Math.round(sh * scale));
@@ -186,11 +195,37 @@ class GLEngine {
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tile);
+        this._sourceSize = [tile.width, tile.height];
+        this._sourceScale = [tile.width / sw, tile.height / sh];
         gl.uniform4f(this.uniforms.u_sourceRegion, sx / iw, sy / ih, sw / iw, sh / ih);
         gl.uniform2f(this.uniforms.u_texelSize, 1 / iw, 1 / ih);
     }
 
     exportImage(img, adjustments, masks = [], scale = 1) {
+        const tiles = this._exportTiles(img, adjustments, masks, scale, 1024);
+        let result;
+        do { result = tiles.next(); } while (!result.done);
+        return result.value;
+    }
+
+    async exportImageAsync(img, adjustments, masks = [], scale = 1, { signal, onProgress } = {}) {
+        const tiles = this._exportTiles(img, adjustments, masks, scale, 512);
+        try {
+            while (true) {
+                if (signal?.aborted) throw new DOMException('Export cancelled.', 'AbortError');
+                const result = tiles.next();
+                if (result.done) return result.value;
+                onProgress?.(result.value);
+                // Yield between bounded native tiles so cancellation and progress
+                // remain usable, even with software graphics and several masks.
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        } finally {
+            tiles.return();
+        }
+    }
+
+    *_exportTiles(img, adjustments, masks, scale, tileSize) {
         const width = Math.round((img.naturalWidth || img.width) * scale);
         const height = Math.round((img.naturalHeight || img.height) * scale);
         if (width < 1 || height < 1 || width > 32767 || height > 32767 || width * height > 128 * 1024 * 1024) {
@@ -199,22 +234,28 @@ class GLEngine {
         const output = document.createElement('canvas');
         output.width = width; output.height = height;
         const ctx = output.getContext('2d');
+        let complete = false;
         try {
             this.loadImage(img);
-            const tileWidth = Math.min(1024, width), tileHeight = Math.min(1024, height);
+            const tileWidth = Math.min(tileSize, width), tileHeight = Math.min(tileSize, height);
+            const total = Math.ceil(width / tileWidth) * Math.ceil(height / tileHeight);
+            let done = 0;
             this.setRenderSize(tileWidth, tileHeight);
             for (let y = 0; y < height; y += tileHeight) {
                 for (let x = 0; x < width; x += tileWidth) {
                     this.setRegion(x / width, y / height, tileWidth / width, tileHeight / height);
-                    this.loadExportTile(img);
+                    this.loadExportTile(img, adjustments);
                     this.renderComposite(adjustments, masks);
                     const w = Math.min(tileWidth, width - x), h = Math.min(tileHeight, height - y);
                     ctx.drawImage(this.canvas, 0, 0, w, h, x, y, w, h);
+                    yield ++done / total;
                 }
             }
             if (this.gl.isContextLost()) throw new Error('Graphics memory was exhausted. Try a smaller photo.');
+            complete = true;
             return output;
         } finally {
+            if (!complete) output.width = output.height = 1;
             if (this._exportSource) this._exportSource.width = this._exportSource.height = 1;
         }
     }
@@ -238,6 +279,7 @@ class GLEngine {
         const gl = this.gl;
         gl.useProgram(this.program);
         const u = this.uniforms;
+        this._showOriginal = !!adj.showOriginal;
 
         gl.uniform1f(u.u_exposure, adj.exposure || 0);
         gl.uniform1f(u.u_contrast, adj.contrast || 0);
@@ -309,15 +351,16 @@ class GLEngine {
     _bindPhotoTextures() {
         const gl = this.gl;
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.imageTexture);
+        gl.bindTexture(gl.TEXTURE_2D, this._showOriginal ? this.imageTexture :
+            this._nightTexture || this.imageTexture);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, this.curveTexture);
     }
 
-    _target() {
+    _target(width = this.canvas.width, height = this.canvas.height) {
         const gl = this.gl;
         const texture = this._createTexture(gl.TEXTURE4, false);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.canvas.width, this.canvas.height,
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height,
             0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         const framebuffer = gl.createFramebuffer();
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -327,6 +370,88 @@ class GLEngine {
             throw new Error('Not enough graphics memory to render this photo.');
         }
         return { texture, framebuffer };
+    }
+
+    _releaseNight() {
+        for (const target of this._nightTargets || []) {
+            this.gl.deleteFramebuffer(target.framebuffer);
+            this.gl.deleteTexture(target.texture);
+        }
+        this._nightTargets = [];
+        this._nightTexture = null;
+        this._nightKey = null;
+    }
+
+    _prepareNight(adj) {
+        if (adj.showOriginal) return;
+        const settings = NightTools.settings(adj);
+        const key = JSON.stringify(settings);
+        if (key === this._nightKey) return;
+        const gl = this.gl;
+        if (!settings.noiseLuma && !settings.noiseColor && !settings.motionAmount) {
+            this._releaseNight();
+            this._nightKey = key;
+            return;
+        }
+        try {
+            if (!this._nightProgram) {
+                const program = gl.createProgram();
+                const vs = this._compileShader(gl.VERTEX_SHADER, NightTools.vertex);
+                const fs = this._compileShader(gl.FRAGMENT_SHADER, NightTools.fragment);
+                gl.attachShader(program, vs); gl.attachShader(program, fs);
+                gl.bindAttribLocation(program, 0, 'a_position');
+                gl.bindAttribLocation(program, 1, 'a_texCoord');
+                gl.linkProgram(program);
+                gl.deleteShader(vs); gl.deleteShader(fs);
+                if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                    gl.deleteProgram(program);
+                    throw new Error('Night tools are not supported by this graphics device.');
+                }
+                this._nightProgram = { program };
+                for (const name of ['source', 'step', 'noise', 'amount', 'kernel[0]', 'mode']) {
+                    this._nightProgram[name] = gl.getUniformLocation(program, `u_${name}`);
+                }
+            }
+            const [width, height] = this._sourceSize;
+            const [scaleX, scaleY] = this._sourceScale;
+            const p = this._nightProgram;
+            let input = this.imageTexture, pass = 0;
+            const draw = (mode, step) => {
+                const target = this._nightTargets[pass] ||= this._target(width, height);
+                pass++;
+                gl.useProgram(p.program);
+                gl.uniform1i(p.source, 0); gl.uniform1i(p.mode, mode);
+                gl.uniform2fv(p.step, step);
+                gl.uniform2f(p.noise, settings.noiseLuma / 100, settings.noiseColor / 100);
+                gl.uniform1f(p.amount, settings.motionAmount / 100);
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, input);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+                gl.viewport(0, 0, width, height);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                input = target.texture;
+            };
+            if (settings.noiseLuma || settings.noiseColor) draw(0, [scaleX / width, scaleY / height]);
+            if (settings.motionAmount) {
+                const scale = Math.min(scaleX, scaleY);
+                const angle = settings.motionAngle * Math.PI / 180;
+                gl.useProgram(p.program);
+                gl.uniform1fv(p['kernel[0]'], NightTools.kernel(settings.motionLength * scale));
+                draw(1, [Math.cos(angle) * scaleX / scale / width,
+                    Math.sin(angle) * scaleY / scale / height]);
+            }
+            if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) {
+                throw new Error('Night tools ran out of graphics resources. Try a smaller photo.');
+            }
+            this._nightTexture = input;
+            this._nightKey = key;
+        } catch (error) {
+            this._releaseNight();
+            throw error;
+        } finally {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.useProgram(this.program);
+        }
     }
 
     _releaseComposite(keepMasks = false) {
@@ -400,6 +525,9 @@ class GLEngine {
 
     renderComposite(adj, masks) {
         const gl = this.gl;
+        if (gl.isContextLost()) throw new Error('Graphics context was lost. Reload the photo or use a smaller image.');
+        // Restore once per source/settings change, shared by every mask layer.
+        this._prepareNight(adj);
         if (!masks.length || adj.showOriginal) {
             if (!masks.length && this._layers?.length) this._releaseComposite();
             this.setAdjustments(adj);
@@ -536,6 +664,8 @@ class GLEngine {
     destroy() {
         const gl = this.gl;
         this._releaseComposite();
+        this._releaseNight();
+        if (this._nightProgram) gl.deleteProgram(this._nightProgram.program);
         if (this._mixer) gl.deleteProgram(this._mixer.program);
         if (this.imageTexture) gl.deleteTexture(this.imageTexture);
         if (this.curveTexture) gl.deleteTexture(this.curveTexture);

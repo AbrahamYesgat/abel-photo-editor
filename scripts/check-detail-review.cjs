@@ -104,7 +104,8 @@ const hash = value => createHash('sha256').update(value).digest('hex');
                 }));
             assert.equal(buttons.length, 3);
             buttons.forEach((box, i) => {
-                assert.ok(box.left >= 0 && box.right <= width && box.height >= 44, 'mobile-safe tap bounds');
+                assert.ok(box.left >= 0 && box.right <= width && box.height >= 44,
+                    `mobile-safe tap bounds: ${JSON.stringify({ width, buttons })}`);
                 if (i) assert.ok(box.left >= buttons[i - 1].right, 'buttons do not overlap');
             });
             for (let i = 0; i < 3; i++) {

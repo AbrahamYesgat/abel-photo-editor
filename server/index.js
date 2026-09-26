@@ -22,7 +22,7 @@ const STATIC_FILES = new Map([
     ...['app.js', 'auto-edit.js', 'curve-editor.js', 'gl-engine.js', 'histogram.js',
         'mask-engine.js', 'presets.js', 'shaders.js', 'review-contract.js', 'review.js',
         'review-prompt.js', 'review-json.js', 'review-manual.js',
-        'raw-policy.js', 'raw-worker.js', 'image-import.js']
+        'raw-policy.js', 'raw-worker.js', 'image-import.js', 'night-tools.js']
         .map(name => [`/js/${name}`, `js/${name}`]),
     ...['libraw.js', 'libraw.wasm', 'LICENSE', 'LICENSE.CDDL', 'COPYRIGHT',
         'LICENSE-LCMS', 'NOTICE.txt', 'integrity.json', 'LICENSE-JPEG', 'LICENSE-PNG', 'LICENSE-ZLIB',

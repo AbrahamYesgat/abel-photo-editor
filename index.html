@@ -9,7 +9,7 @@
     <meta name="abel-azure-review-endpoint" content="https://abel-review-66c1d915.azurewebsites.net">
     <title>ABEL — Photo Editor</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="css/styles.css?v=single-canvas-1">
+    <link rel="stylesheet" href="css/styles.css?v=night-1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2L3 22h18L12 2z' fill='%236366f1'/><path d='M12 8l-4.5 10h9L12 8z' fill='%23818cf8'/></svg>">
@@ -61,6 +61,12 @@
         <button id="btn-auto" title="Auto enhance">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
             Auto
+        </button>
+        <button id="btn-denoise" disabled title="Reduce grain and color speckles locally; does not repair shake blur">
+            Denoise
+        </button>
+        <button id="btn-motion" disabled title="Open experimental motion blur reduction; no automatic changes">
+            Motion blur
         </button>
         <button id="btn-reset" title="Reset all adjustments">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="17" x2="12" y2="17"/></svg>
@@ -508,7 +514,8 @@
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="js/shaders.js?v=single-canvas-1"></script>
-<script src="js/gl-engine.js?v=single-canvas-1"></script>
+<script src="js/night-tools.js?v=night-1"></script>
+<script src="js/gl-engine.js?v=night-1"></script>
 <script src="js/histogram.js"></script>
 <script src="js/curve-editor.js"></script>
 <script src="js/mask-engine.js?v=single-canvas-1"></script>
@@ -521,7 +528,7 @@
 <script src="js/review.js?v=single-canvas-1"></script>
 <script src="js/raw-policy.js?v=cr3-1"></script>
 <script src="js/image-import.js?v=cr3-1"></script>
-<script src="js/app.js?v=cr3-1"></script>
+<script src="js/app.js?v=night-1"></script>
 
 <script>
     document.getElementById('export-quality').addEventListener('input', function() {
