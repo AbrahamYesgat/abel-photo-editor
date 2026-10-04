@@ -118,7 +118,7 @@
                     <button type="button" data-intensity="expressive" aria-pressed="false">Expressive</button>
                 </div>
                 <details class="review-photo-more">
-                    <summary aria-label="More edit controls: mode, strength and Details" title="Mode, strength, details and review">⋯</summary>
+                    <summary aria-label="More edit controls: mode, strength, clarity and texture" title="Mode, strength, clarity, texture and review">⋯</summary>
                     <div class="review-photo-expanded">
                 <div class="review-photo-options">
                     <select id="review-photo-mode" aria-label="Apply saved AI mode">
@@ -129,7 +129,8 @@
                     <output id="review-photo-strength-value">100%</output>
                     <button id="review-open-drawer" type="button">Review</button>
                 </div>
-                <button id="review-photo-details" type="button" aria-pressed="false" aria-label="Include AI clarity in this saved treatment" title="Off keeps the same lighting/color treatment and your original clarity. No new AI call." hidden>Details</button>
+                <button id="review-photo-details" type="button" aria-pressed="false" aria-label="Include AI clarity in this saved treatment" title="Off keeps the same lighting/color treatment and your original clarity. No new AI call." hidden>Clarity</button>
+                <button id="review-photo-texture" type="button" aria-pressed="false" aria-label="Include AI texture in this saved treatment" hidden>Texture</button>
                 <span id="review-photo-state" class="review-photo-state" role="status"></span>
                     </div>
                 </details>
@@ -271,7 +272,9 @@
                 </select>
                 <p class="review-note">One review prepares all three, each with Global and Adaptive alternatives. After Apply, tap the controls beside the photo to switch without regenerating or stacking edits. Rating always describes the reviewed image.</p>
                 <label class="review-consent"><input id="review-allow-details" type="checkbox" checked aria-describedby="review-detail-note">Allow detail adjustments (clarity only)</label>
-                <p id="review-detail-note" class="review-note">On by default for all providers, including manual export. Allows—not forces—small clarity changes when justified by the reduced preview. Uncheck before reviewing to keep detail manual. Intentional softness stays protected. Texture is not supported; sharpening and noise reduction stay manual. After Apply, open ⋯ beside the intensity buttons for Details: compare cached AI clarity on/off without changing the lighting/color treatment or your original clarity. No extra AI call. Older reviews without clarity need a new review to suggest it.</p>
+                <p id="review-detail-note" class="review-note">Clarity is on by default for all providers, including manual export. Allows—not forces—small clarity changes when justified by the reduced preview. Intentional softness stays protected. Sharpening and noise reduction stay manual.</p>
+                <label class="review-consent"><input id="review-allow-texture" type="checkbox" aria-describedby="review-texture-note">Allow texture adjustments</label>
+                <p id="review-texture-note" class="review-note">Off by default. Allows small fine/mid-scale surface contrast changes, independently of clarity. A reduced preview cannot reliably assess fine grain or recover missing detail; uncertain suggestions should be omitted. After Apply, open ⋯ beside the intensity buttons for separate Clarity and Texture comparisons. Off restores your original manual detail settings and keeps the same lighting/color treatment. No extra AI call. Permission is not upload consent.</p>
                 <div id="review-gemini-options">
                     <label class="review-field-label" for="review-gemini-mode">One-click action</label>
                     <select id="review-gemini-mode">

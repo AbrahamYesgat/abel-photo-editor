@@ -24,7 +24,8 @@
     }
     Object.freeze(controls);
     const detailControls = Object.freeze({
-        clarity: Object.freeze({ label: 'Clarity', min: -100, max: 100, step: 1 })
+        clarity: Object.freeze({ label: 'Clarity', min: -100, max: 100, step: 1 }),
+        texture: Object.freeze({ label: 'Texture', min: -100, max: 100, step: 1 })
     });
     const detailLimits = Object.freeze({ refine: 5, balanced: 10, expressive: 15 });
     function detailPolicy(request = {}) {
@@ -39,10 +40,21 @@
         return null;
     }
     function globalControls(intensity, request = {}) {
-        const baseline = detailPolicy(request);
-        return baseline ? { ...controls, clarity: { ...detailControls.clarity,
-            min: Math.max(-100, baseline.clarity - detailLimits[intensity]),
-            max: Math.min(100, baseline.clarity + detailLimits[intensity]) } } : controls;
+        const baseline = { ...detailPolicy(request), ...texturePolicy(request) };
+        return { ...controls, ...Object.fromEntries(Object.entries(baseline).map(([key, value]) =>
+            [key, { ...detailControls[key], min: Math.max(-100, value - detailLimits[intensity]),
+                max: Math.min(100, value + detailLimits[intensity]) }])) };
+    }
+    function texturePolicy(request = {}) {
+        if (request.allowTexture !== undefined && typeof request.allowTexture !== 'boolean') {
+            throw new Error('Invalid texture permission.');
+        }
+        if (request.allowTexture === true) {
+            exact(request.textureAdjustments, ['texture'], 'current texture adjustments');
+            return { texture: number(request.textureAdjustments.texture, -100, 100, 'current texture') };
+        }
+        if (request.textureAdjustments !== undefined) throw new Error('Texture adjustments require explicit permission.');
+        return null;
     }
     const keys = Object.keys(controls);
     const maskControls = Object.freeze(Object.fromEntries(
@@ -60,10 +72,12 @@
         expressive: Object.freeze({ exposure: 2, tonal: 45, color: 35 })
     });
     const regionalControls = (intensity, request = {}) => Object.fromEntries(Object.entries({
-        ...maskControls, ...(detailPolicy(request) ? detailControls : {})
+        ...maskControls,
+        ...(detailPolicy(request) ? { clarity: detailControls.clarity } : {}),
+        ...(texturePolicy(request) ? { texture: detailControls.texture } : {})
     }).map(([key, control]) => {
         const limits = regionalLimits[intensity];
-        const max = key === 'clarity' ? detailLimits[intensity] : key === 'exposure' ? limits.exposure :
+        const max = Object.hasOwn(detailControls, key) ? detailLimits[intensity] : key === 'exposure' ? limits.exposure :
             ['temperature', 'tint', 'saturation'].includes(key) ? limits.color : limits.tonal;
         return [key, { ...control, min: -max, max }];
     }));
@@ -168,14 +182,17 @@
         fail();
     }
     function validateRequest(value) {
-        const optional = ['allowDetails', 'detailAdjustments'].filter(key => value && Object.hasOwn(value, key));
+        const optional = ['allowDetails', 'detailAdjustments', 'allowTexture', 'textureAdjustments']
+            .filter(key => value && Object.hasOwn(value, key));
         exact(value, ['image', 'adjustments', 'intent', ...optional], 'request');
         const detail = detailPolicy(value);
+        const texture = texturePolicy(value);
         return {
             image: validateImage(value.image),
             adjustments: currentAdjustments(value.adjustments),
             intent: text(value.intent, 600, 'intent', true),
-            ...Object.fromEntries(optional.map(key => [key, key === 'detailAdjustments' ? detail : value[key]]))
+            ...Object.fromEntries(optional.map(key => [key, key === 'detailAdjustments' ? detail :
+                key === 'textureAdjustments' ? texture : value[key]]))
         };
     }
     function list(value, max, label, map, min = 0) {
@@ -333,7 +350,7 @@
     });
     const reviewSchema = schemaForRequest();
     return Object.freeze({ controls, readAdjustments, validateRequest, validateReview, reviewSchema,
-        detailControls, detailLimits, detailPolicy, globalControls, schemaForRequest,
+        detailControls, detailLimits, detailPolicy, texturePolicy, globalControls, schemaForRequest,
         reviewCategories, portfolioVerdicts, maskControls, intensities, regionalLimits,
         regionalControls, MAX_REGIONS, MAX_IMAGE_BYTES });
 });

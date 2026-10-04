@@ -70,6 +70,7 @@ const { createServer } = require('../server/index.js');
             document.getElementById('btn-motion').click();
             check(app.state.motionAmount === 0, 'opening motion tool does not apply a guessed blur');
             app.state.clarity = 12;
+            app.state.texture = 45;
             app.state.sharpenAmount = 8;
             app._setNight({ motionAmount: 65, motionLength: 7, motionAngle: 33 });
             check(!document.getElementById('night-status').textContent, 'GPU restoration has no errors');

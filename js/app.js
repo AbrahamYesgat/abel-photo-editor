@@ -27,7 +27,7 @@ class App {
             exposure: 0, contrast: 0, highlights: 0, shadows: 0,
             whites: 0, blacks: 0, temperature: 0, tint: 0,
             vibrance: 0, saturation: 0, clarity: 0, dehaze: 0,
-            sharpenAmount: 0,
+            texture: 0, textureEnabled: true, sharpenAmount: 0,
             noiseLuma: 0, noiseColor: 0,
             motionAmount: 0, motionLength: 4, motionAngle: 0,
             vignetteAmount: 0, vignetteMidpoint: 50, vignetteFeather: 50,
@@ -202,6 +202,13 @@ class App {
     }
 
     _onSliderChange(key, value, category) {
+        if (key === 'texture') {
+            if (!this.image || this.cropTool?.active || this._importController || this._exporting ||
+                this.state.textureEnabled === false) return;
+            this._stopComparison();
+            if (this._nightGesture !== key) this._pushHistory();
+            this._nightGesture = key;
+        }
         if (Object.hasOwn(NightTools.settings(), key)) {
             if (!this.image || this.cropTool?.active || this._importController) return;
             this._stopComparison();
@@ -363,6 +370,21 @@ class App {
 
     _buildDetailPanel() {
         const panel = document.getElementById('panel-detail');
+        const texture = document.createElement('section');
+        texture.innerHTML = '<label class="review-consent"><input id="texture-enabled" type="checkbox" checked>Texture on</label><p class="panel-info">Fine/mid-scale surface contrast, not edge sharpening or recovered detail. Negative softens; positive can emphasize grain. Off preserves your amount; local mask texture stays independent.</p>';
+        this._createSlider(texture, 'Texture', 'texture', -100, 100, 1, 0);
+        texture.querySelector('input[type=checkbox]').addEventListener('change', event => {
+            if (!this.image || this.cropTool?.active || this._importController || this._exporting) return;
+            this._stopComparison();
+            clearTimeout(this._historyDebounce);
+            this._pushHistory();
+            this.state.textureEnabled = event.target.checked;
+            this._syncSlidersFromState();
+            this.review?.onRender();
+            this._render();
+            this._pushHistory();
+        });
+        panel.appendChild(texture);
         this._createSlider(panel, 'Sharpening', 'sharpenAmount', 0, 150, 1, 0);
         const noise = document.createElement('section');
         noise.id = 'night-denoise';
@@ -392,7 +414,7 @@ class App {
         panel.appendChild(status);
         const inspector = document.createElement('details');
         inspector.id = 'night-inspector';
-        inspector.innerHTML = '<summary>100% detail preview · night tools only</summary><p class="panel-info">One photo pixel per canvas pixel. Pick a position to inspect; lighting, masks and sharpening are excluded here. Hold Compare original to check the change.</p><canvas id="night-inspector-canvas" width="280" height="180" aria-label="Native-resolution night correction preview"></canvas>';
+        inspector.innerHTML = '<summary>100% detail preview · night tools only</summary><p class="panel-info">One photo pixel per canvas pixel. Pick a position to inspect; lighting, masks, texture and sharpening are excluded here. Hold Compare original to check the change.</p><canvas id="night-inspector-canvas" width="280" height="180" aria-label="Native-resolution night correction preview"></canvas>';
         for (const [axis, label] of [['x', 'Horizontal position'], ['y', 'Vertical position']]) {
             const row = document.createElement('label');
             row.className = 'slider-row';
@@ -455,6 +477,7 @@ class App {
 
     _updateNightButtons() {
         const disabled = !this.image || !!this.cropTool?.active || !!this._importController || !!this._exporting;
+        this._syncTextureControls();
         for (const id of ['btn-denoise', 'btn-motion']) {
             const button = document.getElementById(id);
             if (button) button.disabled = disabled;
@@ -472,6 +495,14 @@ class App {
         element.scrollIntoView({ block: 'nearest' });
         const key = section === 'motion' ? 'motionAmount' : 'noiseLuma';
         this.sliders[key].input.focus({ preventScroll: true });
+    }
+
+    _syncTextureControls() {
+        const texture = document.getElementById('texture-enabled');
+        if (!texture || !this.sliders.texture) return;
+        texture.checked = this.state.textureEnabled !== false;
+        texture.disabled = !this.image || !!this.cropTool?.active || !!this._importController || !!this._exporting;
+        this.sliders.texture.input.disabled = texture.disabled || !texture.checked;
     }
 
     _setNight(changes) {
@@ -659,6 +690,7 @@ class App {
             ['Tint', 'mask_tint', -100, 100, 1, 0],
             ['Saturation', 'mask_saturation', -100, 100, 1, 0],
             ['Clarity', 'mask_clarity', -100, 100, 1, 0],
+            ['Texture', 'mask_texture', -100, 100, 1, 0],
         ];
         maskSliders.forEach(([l, k, mn, mx, s, d]) => this._createSlider(maskAdj, l, k, mn, mx, s, d, 'mask'));
         panel.appendChild(maskAdj);
@@ -790,7 +822,7 @@ class App {
             this.sliders.mask_opacity.val.textContent = Math.round((mask?.opacity ?? 1) * 100);
         }
         const adj = mask ? mask.adjustments : {};
-        const maskKeys = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation', 'clarity'];
+        const maskKeys = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation', 'clarity', 'texture'];
         for (const key of maskKeys) {
             const sliderKey = 'mask_' + key;
             const slider = this.sliders[sliderKey];
@@ -1568,6 +1600,7 @@ class App {
     }
 
     _syncSlidersFromState() {
+        this._syncTextureControls();
         for (const [key, slider] of Object.entries(this.sliders)) {
             if (key.startsWith('hslHue_') || key.startsWith('hslSat_') || key.startsWith('hslLum_')) {
                 const parts = key.split('_');

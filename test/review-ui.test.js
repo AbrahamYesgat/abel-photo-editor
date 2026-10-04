@@ -88,7 +88,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
         'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
         'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
-        'allow-details', 'photo-details',
+        'allow-details', 'photo-details', 'allow-texture', 'photo-texture',
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
@@ -376,6 +376,45 @@ test('browser rejects unsolicited detail and policy changes cancel pending reque
     assert.equal(review.result, null);
     assert.equal(app.state.clarity, 0);
     assert.equal(app.history.length, 1);
+});
+
+test('texture-only AI permission preserves enabled manual texture, switches and regional settings independently', () => {
+    const { app, review, context } = geminiHarness();
+    context.fetch = () => assert.fail('Cached texture never calls inference');
+    assert.equal(review.elements['allow-texture'].checked, false);
+    app.state.texture = 20;
+    app.state.clarity = 17;
+    const mask = app.maskEngine.createMask('radial');
+    mask.adjustments.texture = -9;
+    app._pushHistory();
+    review.elements['allow-details'].checked = false;
+    review.elements['allow-texture'].checked = true;
+    review.requestPolicy = review.detailRequest();
+    review.context = review.snapshot();
+    review.result = require('./helpers/texture-fixture.cjs')();
+    review.showResult('adaptive');
+    const baseline = review.snapshot().edits;
+    review.apply();
+    assert.equal(app.state.texture, 28);
+    assert.equal(app.state.clarity, 17);
+    assert.equal(app.state.textureEnabled, true);
+    assert.equal(app.maskEngine.masks[0].adjustments.texture, -9);
+    for (const intensity of ['refine', 'balanced', 'expressive']) {
+        review.chooseIntensity(intensity);
+        review.elements['photo-texture'].dispatch('click');
+        assert.equal(review.snapshot().edits, baseline);
+        review.elements['photo-texture'].dispatch('click');
+    }
+    review.elements.strength.value = '50';
+    review.apply();
+    assert.equal(app.state.texture, 26);
+    review.selection = 'global';
+    review.apply();
+    review.elements['photo-texture'].dispatch('click');
+    assert.equal(app.state.texture, 20);
+    assert.equal(app.state.exposure, .15);
+    review.chooseIntensity('refine');
+    assert.equal(app.state.texture, 20, 'switching intensity never re-enables omitted texture');
 });
 
 test('interpolated clarity remains inside relative limits even with a fractional manual baseline', () => {
@@ -1232,7 +1271,7 @@ test('cloud and local reviews use separate endpoints and credentials with identi
         assert.equal(requests[0].headers.Authorization, `Bearer ${provider === 'local' ? 'local' : 'cloud'}-test-token`);
         assert.equal(requests[0].redirect, 'error');
         assert.equal(requests[0].credentials, 'omit');
-        assert.deepEqual(Object.keys(JSON.parse(requests[0].body)).sort(), ['adjustments', 'allowDetails', 'image', 'intent']);
+        assert.deepEqual(Object.keys(JSON.parse(requests[0].body)).sort(), ['adjustments', 'allowDetails', 'allowTexture', 'image', 'intent']);
         const image = app.image;
         review.selection = 'global';
         review.apply();
@@ -1398,7 +1437,7 @@ test('only successful validated local reviews persist; cloud credentials and req
             context.ReviewContract = { ...ReviewContract, validateRequest() {} };
             context.fetch = async (url, options) => {
                 assert.equal(options.headers.Authorization, `Bearer ${provider === 'local' ? savedLocal.token : 'synthetic-cloud-token'}`);
-                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowDetails', 'detailAdjustments', 'image', 'intent']);
+                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowDetails', 'allowTexture', 'detailAdjustments', 'image', 'intent']);
                 assert.ok(!options.body.includes('token'));
                 return Response.json(valid ? response([]) : { error: 'Malformed review' });
             };

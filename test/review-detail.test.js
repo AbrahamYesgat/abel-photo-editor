@@ -20,7 +20,7 @@ const request = () => ({
 test('detail permission is explicit, closed, finite, backwards compatible and separate from lighting controls', () => {
     assert.equal(Object.keys(contract.controls).length, 34);
     assert.equal(Object.keys(contract.maskControls).length, 7);
-    assert.deepEqual(Object.keys(contract.detailControls), ['clarity']);
+    assert.deepEqual(Object.keys(contract.detailControls), ['clarity', 'texture']);
     assert.deepEqual(contract.validateRequest(request()), request());
     assert.deepEqual(contract.validateRequest({ ...request(), allowDetails: false }), { ...request(), allowDetails: false });
     const input = { ...request(), ...policy };

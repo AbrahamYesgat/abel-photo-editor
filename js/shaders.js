@@ -20,6 +20,7 @@ varying vec2 v_texCoord;
 
 uniform sampler2D u_image;
 uniform sampler2D u_curveLUT;
+uniform sampler2D u_textureBand;
 uniform vec2 u_resolution;
 uniform vec2 u_texelSize;
 uniform vec4 u_sourceRegion;
@@ -36,6 +37,7 @@ uniform float u_tint;
 uniform float u_vibrance;
 uniform float u_saturation;
 uniform float u_clarity;
+uniform float u_texture;
 uniform float u_dehaze;
 
 // HSL — 8 color ranges
@@ -203,6 +205,11 @@ void main() {
         color = clamp(color, 0.0, 1.0);
     }
 
+    if (u_texture != 0.0) {
+        vec2 band = texture2D(u_textureBand, (v_texCoord - u_sourceRegion.xy) / u_sourceRegion.zw).rg;
+        color = clamp(color + (band.r - band.g) * 0.04 * (u_texture / 100.0), 0.0, 1.0);
+    }
+
     // ---- 7. Vibrance ----
     if (u_vibrance != 0.0) {
         float vib = u_vibrance / 100.0;
@@ -333,5 +340,38 @@ void main() {
     }
 
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), texColor.a);
+}
+`;
+
+// Shared by global and masked layers; recompute only when source/night settings change.
+const TEXTURE_FRAGMENT_SHADER = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_source;
+uniform vec2 u_step;
+float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+void main() {
+    float center = luminance(texture2D(u_source, v_uv).rgb);
+    // Two edge-aware Gaussian scales, not center-minus-neighbors sharpening.
+    float fine = 4.0 * center, coarse = fine;
+    float fineWeight = 4.0, coarseWeight = 4.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            if (x != 0 || y != 0) {
+                vec2 offset = vec2(float(x), float(y)) * u_step;
+                float a = luminance(texture2D(u_source, v_uv + offset).rgb);
+                float b = luminance(texture2D(u_source, v_uv + offset * 3.0).rgb);
+                float spatial = (x == 0 || y == 0) ? 2.0 : 1.0;
+                float wa = spatial * (1.0 - smoothstep(0.04, 0.12, abs(a - center)));
+                float wb = spatial * (1.0 - smoothstep(0.04, 0.12, abs(b - center)));
+                fine += a * wa; fineWeight += wa;
+                coarse += b * wb; coarseWeight += wb;
+            }
+        }
+    }
+    float band = fine / fineWeight - coarse / coarseWeight;
+    band = clamp(band, -0.04, 0.04) * smoothstep(0.002, 0.012, abs(band));
+    // Separate signs retain exact zero in RGBA8 without requiring float textures.
+    gl_FragColor = vec4(max(band, 0.0) / 0.04, max(-band, 0.0) / 0.04, 0.0, 1.0);
 }
 `;

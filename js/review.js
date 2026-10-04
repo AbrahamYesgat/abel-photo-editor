@@ -12,6 +12,7 @@ class ReviewPanel {
         this.selection = '';
         this.intensity = 'balanced';
         this.includeDetails = false;
+        this.includeTexture = false;
         this.requestPolicy = null;
         this.elements = {};
         this.cloudProvider = document.getElementById('review-provider').value === 'gemini' ? 'gemini' : 'azure';
@@ -26,7 +27,7 @@ class ReviewPanel {
             'gemini-options', 'gemini-mode', 'gemini-strength', 'gemini-strength-value', 'intent-note',
             'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
             'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
-            'allow-details', 'photo-details',
+            'allow-details', 'photo-details', 'allow-texture', 'photo-texture',
             'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
             'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
@@ -40,6 +41,15 @@ class ReviewPanel {
         el['photo-details'].addEventListener('click', () => {
             if (!this.hasDetails()) return;
             this.includeDetails = !this.includeDetails;
+            this.apply(true);
+        });
+        el['allow-texture'].checked = false;
+        el['allow-texture'].addEventListener('change', () => {
+            this.invalidate('Texture permission changed. Request a new review; existing edits are unchanged.');
+        });
+        el['photo-texture'].addEventListener('click', () => {
+            if (!this.hasTexture()) return;
+            this.includeTexture = !this.includeTexture;
             this.apply(true);
         });
         el.intensity.value = this.intensity;
@@ -187,9 +197,13 @@ class ReviewPanel {
     }
 
     detailRequest() {
-        return this.elements['allow-details'].checked
+        const clarity = this.elements['allow-details'].checked
             ? { allowDetails: true, detailAdjustments: { clarity: this.app.state.clarity } }
             : { allowDetails: false };
+        return { ...clarity, allowTexture: !!this.elements['allow-texture'].checked,
+            ...(this.elements['allow-texture'].checked ? { textureAdjustments: {
+                texture: this.app.state.textureEnabled === false ? 0 : this.app.state.texture || 0
+            } } : {}) };
     }
 
     chooseIntensity(value) {
@@ -576,6 +590,7 @@ class ReviewPanel {
         return {
             image: this.app.image,
             allowDetails: !!this.elements['allow-details'].checked,
+            allowTexture: !!this.elements['allow-texture'].checked,
             edits: JSON.stringify({
                 state: this.app.state,
                 curves: this.app.curveEditor.channels,
@@ -589,7 +604,7 @@ class ReviewPanel {
         if (!context) return false;
         const current = this.snapshot();
         return context.image === current.image && context.edits === current.edits &&
-            context.allowDetails === current.allowDetails;
+            context.allowDetails === current.allowDetails && context.allowTexture === current.allowTexture;
     }
 
     canCompare() {
@@ -629,6 +644,7 @@ class ReviewPanel {
         this.appliedOptions = null;
         this.requestPolicy = null;
         this.includeDetails = false;
+        this.includeTexture = false;
         this.selection = '';
         this.elements.alternative.value = '';
         this.elements['apply-bar'].hidden = true;
@@ -674,12 +690,20 @@ class ReviewPanel {
         const hasDetails = this.hasDetails();
         el['photo-details'].hidden = !this.appliedContext;
         el['photo-details'].disabled = busy || !hasDetails;
-        el['photo-details'].textContent = hasDetails ? `Details: ${this.includeDetails ? 'on' : 'off'}` : 'No AI clarity suggested';
+        el['photo-details'].textContent = hasDetails ? `Clarity: ${this.includeDetails ? 'on' : 'off'}` : 'No AI clarity suggested';
         el['photo-details'].setAttribute('aria-label', hasDetails ? 'Include AI clarity in this saved treatment' : 'No AI clarity suggested in this treatment');
         el['photo-details'].title = hasDetails
             ? 'Off keeps the same lighting/color treatment and your original clarity. No new AI call.'
             : 'This recipe has no AI clarity changes. Allow detail adjustments before a new review to permit them; they are not guaranteed.';
         el['photo-details'].setAttribute('aria-pressed', String(hasDetails && !!this.includeDetails));
+        const hasTexture = this.hasTexture();
+        el['photo-texture'].hidden = !this.appliedContext;
+        el['photo-texture'].disabled = busy || !hasTexture;
+        el['photo-texture'].textContent = hasTexture ? `Texture: ${this.includeTexture ? 'on' : 'off'}` : 'No AI texture suggested';
+        el['photo-texture'].setAttribute('aria-pressed', String(hasTexture && this.includeTexture));
+        el['photo-texture'].title = hasTexture
+            ? 'Off keeps lighting/color, clarity and your original manual texture, including existing masks. No new AI call.'
+            : 'Allow texture before a new review to permit suggestions; they are not guaranteed.';
         el['strength-value'].value = `${el.strength.value}%`;
         if (this.appliedContext) {
             el['gemini-strength'].value = el.strength.value;
@@ -890,11 +914,13 @@ class ReviewPanel {
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
             intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
             allowDetails: !!el['allow-details'].checked,
+            allowTexture: !!el['allow-texture'].checked,
         });
         const settingsUnchanged = () => requestSettings === JSON.stringify({
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
             intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
             allowDetails: !!el['allow-details'].checked,
+            allowTexture: !!el['allow-texture'].checked,
         });
         try {
             const endpoint = this.endpoint();
@@ -986,6 +1012,7 @@ class ReviewPanel {
         const el = this.elements;
         const result = this.result;
         this.includeDetails = this.requestPolicy?.allowDetails === true;
+        this.includeTexture = this.requestPolicy?.allowTexture === true;
         el.feedback.replaceChildren();
         el.feedback.append(this.text('div', `${result.rating.toFixed(1)} / 10`, 'review-rating'));
         el.feedback.append(this.text('p', 'Subjective assessment of the current edit', 'review-note'));
@@ -1040,11 +1067,18 @@ class ReviewPanel {
 
     proposal() {
         const proposal = this.rawProposal();
-        if (this.includeDetails) return proposal;
-        const lightingOnly = changes => changes.filter(change => !Object.hasOwn(ReviewContract.detailControls, change.key));
+        const lightingOnly = changes => changes.filter(change =>
+            (change.key !== 'clarity' || this.includeDetails) && (change.key !== 'texture' || this.includeTexture));
         return { adjustments: lightingOnly(proposal.adjustments),
             regions: proposal.regions.map(region => ({ ...region, adjustments: lightingOnly(region.adjustments) }))
                 .filter(region => region.adjustments.some(change => change.value !== 0)) };
+    }
+
+    hasTexture() {
+        if (!this.requestPolicy?.allowTexture) return false;
+        const proposal = this.rawProposal();
+        return proposal.adjustments.some(change => change.key === 'texture') ||
+            proposal.regions.some(region => region.adjustments.some(change => change.key === 'texture'));
     }
 
     control(key) {
@@ -1055,7 +1089,8 @@ class ReviewPanel {
         const context = this.beforeContext || this.context;
         if (!this.result || !context) return [];
         const state = JSON.parse(context.edits).state;
-        const current = { ...ReviewContract.readAdjustments(state), clarity: state.clarity };
+        const current = { ...ReviewContract.readAdjustments(state), clarity: state.clarity,
+            texture: state.textureEnabled === false ? 0 : state.texture || 0 };
         const strength = this.strength();
         return this.proposal().adjustments.map(change => {
             const control = ReviewContract.globalControls(this.intensity || 'balanced', this.requestPolicy || {})[change.key];
@@ -1179,7 +1214,13 @@ class ReviewPanel {
                 }
                 const hsl = /^(hslHue|hslSat|hslLum)_([0-7])$/.exec(key);
                 if (hsl) next[hsl[1]][Number(hsl[2])] = value;
-                else next[key] = value;
+                else {
+                    // A disabled manual amount is not the reviewed effective baseline.
+                    // Zero strength and unchanged targets preserve the switch and saved amount.
+                    if (key === 'texture' && (value === (next.textureEnabled === false ? 0 : next.texture || 0))) continue;
+                    next[key] = value;
+                    if (key === 'texture') next.textureEnabled = true;
+                }
             }
             const newMasks = this.app.maskEngine.buildReviewMasks(this.regions());
             const beforeMasks = switching ? this.beforeMasks : this.app.maskEngine.captureMasks();
@@ -1208,11 +1249,11 @@ class ReviewPanel {
             this.context = null;
             this.appliedContext = this.snapshot();
             this.appliedOptions = { intensity: this.intensity || 'balanced', selection: this.selection,
-                strength: this.elements.strength.value, includeDetails: this.includeDetails };
+                strength: this.elements.strength.value, includeDetails: this.includeDetails, includeTexture: this.includeTexture };
             if (interactive) this.app._requestRender();
             else this.app._render();
             this.showAdjustments();
-            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo; ⋯ opens Details and strength — no new review. ${this.hasDetails() ? 'AI clarity is available in this treatment.' : 'No AI clarity suggested in this treatment; your original detail settings remain.'} Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
+            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo; ⋯ opens separate Clarity / Texture toggles and strength — no new review. ${this.hasDetails() ? 'AI clarity available.' : 'No AI clarity suggested.'} ${this.hasTexture() ? 'AI texture available.' : 'No AI texture suggested.'} Off preserves your original manual detail. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
             this.updateButtons();
         } catch (error) {
             if (rollback) {
@@ -1235,6 +1276,7 @@ class ReviewPanel {
                 this.intensity = this.appliedOptions.intensity;
                 this.selection = this.appliedOptions.selection;
                 this.includeDetails = this.appliedOptions.includeDetails;
+                this.includeTexture = this.appliedOptions.includeTexture;
                 this.elements.alternative.value = this.selection;
                 this.elements.strength.value = this.appliedOptions.strength;
             }

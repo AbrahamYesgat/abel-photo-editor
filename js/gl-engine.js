@@ -86,10 +86,10 @@ class GLEngine {
         const gl = this.gl;
         const p = this.program;
         const names = [
-            'u_image', 'u_curveLUT', 'u_resolution', 'u_texelSize', 'u_region', 'u_sourceRegion',
+            'u_image', 'u_curveLUT', 'u_textureBand', 'u_resolution', 'u_texelSize', 'u_region', 'u_sourceRegion',
             'u_exposure', 'u_contrast', 'u_highlights', 'u_shadows',
             'u_whites', 'u_blacks', 'u_temperature', 'u_tint',
-            'u_vibrance', 'u_saturation', 'u_clarity', 'u_dehaze',
+            'u_vibrance', 'u_saturation', 'u_clarity', 'u_texture', 'u_dehaze',
             'u_cgShadowsCol', 'u_cgShadowsBlend',
             'u_cgMidtonesCol', 'u_cgMidtonesBlend',
             'u_cgHighlightsCol', 'u_cgHighlightsBlend',
@@ -182,7 +182,8 @@ class GLEngine {
         // The finite inverse support + denoise + downstream detail taps, not
         // just the forward blur length, determines the seam-free halo.
         const night = NightTools.settings(adjustments);
-        const pad = 4 + (night.noiseLuma || night.noiseColor ? 2 : 0) +
+        const pad = Math.max(4, Math.ceil(3 * Math.max(1, Math.max(iw, ih) / 1600)) + 1) +
+            (night.noiseLuma || night.noiseColor ? 2 : 0) +
             (night.motionAmount ? NightTools.radius : 0);
         const sx = Math.max(0, Math.floor(x * iw) - pad), sy = Math.max(0, Math.floor(y * ih) - pad);
         const sw = Math.min(iw, Math.ceil((x + w) * iw) + pad) - sx;
@@ -280,6 +281,8 @@ class GLEngine {
         gl.useProgram(this.program);
         const u = this.uniforms;
         this._showOriginal = !!adj.showOriginal;
+        this._prepareTexture(adj);
+        gl.useProgram(this.program);
 
         gl.uniform1f(u.u_exposure, adj.exposure || 0);
         gl.uniform1f(u.u_contrast, adj.contrast || 0);
@@ -292,6 +295,7 @@ class GLEngine {
         gl.uniform1f(u.u_vibrance, adj.vibrance || 0);
         gl.uniform1f(u.u_saturation, adj.saturation || 0);
         gl.uniform1f(u.u_clarity, adj.clarity || 0);
+        gl.uniform1f(u.u_texture, adj.textureEnabled === false ? 0 : adj.texture || 0);
         gl.uniform1f(u.u_dehaze, adj.dehaze || 0);
 
         gl.uniform1f(u.u_sharpenAmount, adj.sharpenAmount || 0);
@@ -355,6 +359,9 @@ class GLEngine {
             this._nightTexture || this.imageTexture);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, this.curveTexture);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, this._textureTarget?.texture || this.imageTexture);
+        gl.uniform1i(this.uniforms.u_textureBand, 2);
     }
 
     _target(width = this.canvas.width, height = this.canvas.height) {
@@ -373,6 +380,7 @@ class GLEngine {
     }
 
     _releaseNight() {
+        this._releaseTexture();
         for (const target of this._nightTargets || []) {
             this.gl.deleteFramebuffer(target.framebuffer);
             this.gl.deleteTexture(target.texture);
@@ -380,6 +388,59 @@ class GLEngine {
         this._nightTargets = [];
         this._nightTexture = null;
         this._nightKey = null;
+    }
+
+    _releaseTexture() {
+        if (this._textureTarget) {
+            this.gl.deleteFramebuffer(this._textureTarget.framebuffer);
+            this.gl.deleteTexture(this._textureTarget.texture);
+        }
+        this._textureTarget = null;
+        this._textureKey = null;
+    }
+
+    _prepareTexture(adj) {
+        if (!adj.texture || adj.textureEnabled === false || adj.showOriginal) return;
+        if (this._textureTarget && this._textureKey === this._nightKey) return;
+        const gl = this.gl;
+        try {
+            if (!this._textureProgram) {
+                const program = gl.createProgram();
+                const vs = this._compileShader(gl.VERTEX_SHADER, NightTools.vertex);
+                const fs = this._compileShader(gl.FRAGMENT_SHADER, TEXTURE_FRAGMENT_SHADER);
+                gl.attachShader(program, vs); gl.attachShader(program, fs);
+                gl.bindAttribLocation(program, 0, 'a_position'); gl.bindAttribLocation(program, 1, 'a_texCoord');
+                gl.linkProgram(program); gl.deleteShader(vs); gl.deleteShader(fs);
+                if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                    gl.deleteProgram(program);
+                    throw new Error('Texture is not supported by this graphics device.');
+                }
+                this._textureProgram = { program, source: gl.getUniformLocation(program, 'u_source'),
+                    step: gl.getUniformLocation(program, 'u_step') };
+            }
+            const [width, height] = this._sourceSize;
+            const radius = Math.max(1, Math.max(this.imageWidth, this.imageHeight) / 1600);
+            const p = this._textureProgram;
+            const target = this._textureTarget ||= this._target(width, height);
+            gl.useProgram(p.program);
+            gl.uniform1i(p.source, 0);
+            gl.uniform2f(p.step, radius * this._sourceScale[0] / width, radius * this._sourceScale[1] / height);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, this._nightTexture || this.imageTexture);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+            gl.viewport(0, 0, width, height);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) {
+                throw new Error('Texture ran out of graphics resources. Try a smaller photo.');
+            }
+            this._textureKey = this._nightKey;
+        } catch (error) {
+            this._releaseTexture();
+            throw error;
+        } finally {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.useProgram(this.program);
+        }
     }
 
     _prepareNight(adj) {
@@ -528,6 +589,8 @@ class GLEngine {
         if (gl.isContextLost()) throw new Error('Graphics context was lost. Reload the photo or use a smaller image.');
         // Restore once per source/settings change, shared by every mask layer.
         this._prepareNight(adj);
+        // The manual switch bypasses only the global amount, never existing local texture.
+        adj = { ...adj, texture: adj.textureEnabled === false ? 0 : adj.texture || 0, textureEnabled: true };
         if (!masks.length || adj.showOriginal) {
             if (!masks.length && this._layers?.length) this._releaseComposite();
             this.setAdjustments(adj);
@@ -667,6 +730,7 @@ class GLEngine {
         this._releaseNight();
         if (this._nightProgram) gl.deleteProgram(this._nightProgram.program);
         if (this._mixer) gl.deleteProgram(this._mixer.program);
+        if (this._textureProgram) gl.deleteProgram(this._textureProgram.program);
         if (this.imageTexture) gl.deleteTexture(this.imageTexture);
         if (this.curveTexture) gl.deleteTexture(this.curveTexture);
         if (this.program) gl.deleteProgram(this.program);

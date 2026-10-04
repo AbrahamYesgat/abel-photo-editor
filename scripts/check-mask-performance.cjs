@@ -18,7 +18,7 @@ const { createServer } = require('../server/index.js');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(process.env.BASE_URL || `http://127.0.0.1:${server.address().port}/`);
         await page.waitForFunction(() => window.app?.review);
-        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools }) => {
+        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture }) => {
             const source = document.createElement('canvas');
             source.width = 6000; source.height = 4000;
             const ctx = source.getContext('2d');
@@ -30,11 +30,13 @@ const { createServer } = require('../server/index.js');
             await app._loadFile(new File([blob], 'large.png', { type: 'image/png' }));
             if (nightTools) app._setNight({ noiseLuma: 60, noiseColor: 70,
                 motionAmount: 60, motionLength: 8, motionAngle: 20 });
+            if (texture) app.state.texture = 40;
             for (let i = 0; i < 6; i++) {
                 const mask = app.maskEngine.createMask('radial');
                 app.maskEngine.createRadialMask(mask.canvas.width * (i + 1) / 7,
                     mask.canvas.height / 2, mask.canvas.width / 4, mask.canvas.height / 2, 80);
                 mask.adjustments.exposure = (i % 2 ? -.2 : .3);
+                if (texture) mask.adjustments.texture = i + 3;
                 if (i > 2) mask.blend = 'additive';
             }
             const times = [];
@@ -85,11 +87,11 @@ const { createServer } = require('../server/index.js');
                 canvas.width = canvas.height = 1;
             }
             app._render();
-            return { mobile, nightTools, times, latency, brushLatency, exported, render: [app.glEngine.canvas.width, app.glEngine.canvas.height],
+            return { mobile, nightTools, texture, times, latency, brushLatency, exported, render: [app.glEngine.canvas.width, app.glEngine.canvas.height],
                 masks: app.maskEngine.masks.map(mask => [mask.canvas.width, mask.canvas.height]),
                 composite: !!document.getElementById('composite-overlay'),
                 glError: app.glEngine.gl.getError(), contextLost: app.glEngine.gl.isContextLost() };
-        }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS });
+        }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS, texture: !!process.env.TEXTURE });
         console.log(JSON.stringify(metrics));
         assert.deepEqual(errors, []);
         assert.equal(metrics.glError, 0);
