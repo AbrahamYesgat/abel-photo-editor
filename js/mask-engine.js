@@ -5,7 +5,7 @@ class MaskEngine {
         this.masks = [];
         this.activeMaskIndex = -1;
         this.isDrawing = false;
-        this.tool = 'brush'; // brush, radial, gradient, wand
+        this.tool = 'brush'; // brush, radial, gradient, wand, polygon
         this.brushSize = 50;
         this.brushFeather = 50;
         this.brushFlow = 80;
@@ -42,7 +42,7 @@ class MaskEngine {
                 type: mask.type, visible: mask.visible, inverted: mask.inverted,
                 adjustments: ManualControls.normalize(mask.adjustments), params: mask.params,
                 name: mask.name, reason: mask.reason, blend: mask.blend, opacity: mask.opacity ?? 1,
-                detection: mask.detection, skyPreset: mask.skyPreset
+                detection: mask.detection, skyPreset: mask.skyPreset, polygonBaked: mask.polygonBaked
             };
         });
     }
@@ -68,7 +68,8 @@ class MaskEngine {
     }
 
     restoreMasks(snapshots, sharePixels = false) {
-        this.masks = snapshots.map(saved => {
+        this.masks = snapshots.filter(saved => saved.type !== 'polygon' ||
+            PolygonGeometry.validParams(saved.params)).map(saved => {
             const { canvas: source, ...metadata } = saved;
             const canvas = sharePixels ? source : document.createElement('canvas');
             if (!sharePixels) {
@@ -140,7 +141,7 @@ class MaskEngine {
         canvas.width = mw;
         canvas.height = mh;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = (type === 'brush' || type === 'wand') ? 'black' : 'white';
+        ctx.fillStyle = (type === 'brush' || type === 'wand' || type === 'polygon') ? 'black' : 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         const mask = {
@@ -163,8 +164,16 @@ class MaskEngine {
         return mask;
     }
 
+    setPolygon(mask, points, feather = 0) {
+        if (mask?.type !== 'polygon' || !PolygonGeometry.validParams({ points, feather })) return false;
+        this.touch(mask);
+        PolygonGeometry.rasterize(mask.ctx, mask.canvas.width, mask.canvas.height, points, feather);
+        mask.params = { points: points.map(p => ({ x: p.x, y: p.y })), feather };
+        return true;
+    }
+
     cropDetectedMasks({ x, y, width, height, rotation, sourceWidth, sourceHeight }) {
-        return this.masks.filter(mask => mask.detection).map(mask => {
+        return this.masks.filter(mask => mask.detection || mask.type === 'polygon' || mask.polygonBaked).map(mask => {
             const scale = Math.min(1, 2048 / Math.max(width, height));
             const canvas = document.createElement('canvas');
             canvas.width = Math.max(1, Math.round(width * scale));
@@ -178,7 +187,15 @@ class MaskEngine {
             ctx.translate(-sourceWidth / 2, -sourceHeight / 2);
             ctx.drawImage(mask.canvas, 0, 0, sourceWidth, sourceHeight);
             ctx.setTransform(1, 0, 0, 1, 0, 0);
-            return { ...mask, canvas, ctx, revision: (mask.revision || 0) + 1, sharedPixels: false };
+            const result = { ...mask, canvas, ctx, revision: (mask.revision || 0) + 1, sharedPixels: false };
+            if (mask.type === 'polygon') {
+                // A crop can split a concave polygon into disconnected pieces.
+                // Preserve its exact painted coverage rather than invent connecting edges.
+                Object.assign(result, { type: 'brush', params: null, polygonBaked: true,
+                    name: `${mask.name || 'Polygon'} (cropped)`,
+                    reason: 'Crop preserved this polygon as a brush mask. Corners are baked; Brush / Erase still works. Undo crop restores editable corners.' });
+            }
+            return result;
         });
     }
 

@@ -95,6 +95,7 @@ class PhotoViewport {
                 const transform = `translate(-50%, -50%) translate(${this.x}px, ${this.y}px) scale(${this.scale})`;
                 this.canvas.style.transform = this.overlay.style.transform = transform;
             }
+            this.app.polygon?.draw();
             this.container.classList.toggle('photo-zoomed', this.scale > 1);
             this.button.hidden = !this.app.image || this.app.cropTool?.active;
             this.button.textContent = this.scale === 1 ? 'Fit' : `${this.scale.toFixed(1)}× · Fit`;
@@ -117,7 +118,7 @@ class PhotoViewport {
         try { this.canvas.setPointerCapture(e.pointerId); } catch { /* Window release fallback. */ }
         if (this.pointers.size > 1) {
             this.app._stopComparison();
-            this.finishMask();
+            this.finishMask(true);
             this.pending = null;
             this.navigation = true;
             const cursor = document.getElementById('brush-cursor');
@@ -129,7 +130,8 @@ class PhotoViewport {
         this.start = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey };
         this.startedAt = performance.now();
         this.navigation = false;
-        if (this.app.maskMode && e.target === this.canvas) {
+        if (this.app.maskMode && (e.target === this.canvas ||
+            this.app.polygon?.active && this.app.polygon.hitsImage(e))) {
             if (e.pointerType === 'touch') this.pending = [this.start];
             else { this.app._canvasPointerDown(e); this.drawing = true; }
         }
@@ -184,8 +186,8 @@ class PhotoViewport {
         this.drawing = true;
     }
 
-    finishMask() {
-        if (this.drawing) this.app._canvasPointerUp();
+    finishMask(cancelled = false) {
+        if (this.drawing) this.app._canvasPointerUp(cancelled);
         this.drawing = false;
     }
 
@@ -193,7 +195,7 @@ class PhotoViewport {
         if (!this.pointers.has(e.pointerId)) return;
         if (!cancelled && !this.navigation && this.pointers.size === 1) this.commitMask();
         this.pending = null;
-        this.finishMask();
+        this.finishMask(cancelled);
         this.pointers.delete(e.pointerId);
         if (this.navigation) this.app._suppressCanvasClickUntil = Date.now() + 600;
         if (cancelled) this.app._stopComparison();
@@ -205,7 +207,7 @@ class PhotoViewport {
 
     cancel() {
         this.pending = null;
-        this.finishMask();
+        this.finishMask(true);
         const ids = [...this.pointers.keys()];
         this.pointers.clear();
         this.pinch = null;

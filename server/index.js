@@ -23,6 +23,7 @@ const STATIC_FILES = new Map([
         'mask-engine.js', 'presets.js', 'shaders.js', 'review-contract.js', 'review.js',
         'review-prompt.js', 'review-json.js', 'review-manual.js',
         'raw-policy.js', 'raw-worker.js', 'image-import.js', 'night-tools.js', 'photo-viewport.js', 'manual-controls.js',
+        'polygon-geometry.js', 'polygon-tool.js',
         'segmentation.js', 'segmentation-worker.js']
         .map(name => [`/js/${name}`, `js/${name}`]),
     ...['libraw.js', 'libraw.wasm', 'LICENSE', 'LICENSE.CDDL', 'COPYRIGHT',

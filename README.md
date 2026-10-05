@@ -5,7 +5,7 @@ A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional 
 ## Manual controls: whole photo and masks
 
 Masks now expose **Whites, Blacks, Vibrance, Dehaze and Sharpening**, alongside
-the existing local controls. Select any brush, gradient, radial, selection,
+the existing local controls. Select any brush, gradient, radial, polygon, selection,
 sky or subject mask; expand **Light**, **Color** or **Detail** as needed.
 Whole-photo controls were already available in Basic and Detail.
 
@@ -55,6 +55,63 @@ rendering was slower (~1.4–3.4 seconds); these are fixture measurements, not a
 phone performance guarantee. The small native-export fixture matched the
 preview exactly; the existing combined detail/tile regression stayed within
 2/255 per channel.
+
+## Polygon masks, including corner triangles
+
+Open **Masks → Polygon**, then tap/click the photo to place **3–64 corners**.
+For a corner triangle, place a point at the photo corner and two along its
+adjacent edges; points snap to an image edge within 8 screen pixels.
+Tap the first point, press **Enter**, or choose **Finish polygon** to close it.
+Nothing is applied or added to history until finishing. **Undo point**
+(Backspace/Delete outside text fields) removes the last draft point.
+**Cancel / Escape**, changing tools/panels, closing the mobile drawer or
+opening another photo discards the unfinished shape.
+
+Select the finished polygon in the mask list and **drag its corners**.
+The outline updates immediately; the mask pixels update once on release,
+as one undo step. A click away from a handle does not start another shape:
+use **Polygon** again. Concave shapes work; crossing/touching edges,
+repeated corners and zero-area shapes are rejected, keeping the previous
+valid mask. Handles have fixed screen-size touch targets through zoom/pan.
+Two fingers zoom/pan without adding points; mouse wheel and **Fit** also work.
+On mobile the photo stays above the mask drawer.
+
+**Feather** softens *inward* from all edges, including edges along the photo
+boundary (0 = hard; 100 = a transition spanning 25% of the shorter image
+dimension). Thin shapes can become mostly soft. This is a distance-to-edge
+transition, not a scaled-down polygon or a browser-dependent blur filter.
+Changes apply when releasing the feather slider or leaving the numeric field.
+**Invert polygon** selects its complement. All 14 local Light/Color/Detail
+controls, Mask strength, Reset mask adjustments, comparison, Undo/Redo,
+Library edit storage and native-resolution export use the existing pipelines.
+Done Masking or another panel hides the editing outline; Toggle Overlay
+controls the optional red selection tint.
+
+**Crop limitation:** cropping/rotating preserves polygon coverage, feather,
+inversion and adjustments as a **“Polygon (cropped)” brush mask**. Corners
+are then baked, not movable; Brush / Erase can refine it. This avoids joining
+disconnected pieces of a clipped concave shape. Undo crop restores the
+original editable polygon; crop redo remains unsupported, as before.
+Polygon masks use the existing **2048-pixel maximum mask raster dimension**,
+with normalized geometry independent of photo/preview size. No new AI
+capability, inference, photo upload or dependency is involved.
+
+Validation: `node --test test/polygon.test.js` and
+`PLAYWRIGHT_MODULE=/path/to/playwright node scripts/check-polygon.cjs`.
+The browser check uses actual desktop clicks and mobile touch input, sequential
+pinch takeover, shape editing/history, concavity, analytic feather pixel
+checks, local controls, Library persistence, crop/undo and native export.
+Set `BASE_URL` to test a deployed site; `ARTIFACT_DIR` saves screenshots.
+Physical iOS remains unverified.
+
+`EXPORT_PHOTO=1 node scripts/check-polygon-performance.cjs` checks a 24 MP
+source with three existing masks and a 64-corner polygon. Local Chromium
+desktop/mobile-emulation measurements: **55–84 ms** warm slider updates,
+**41–147 ms** feather rasterization, and **191–222 ms** on drag release.
+The 30-frame corner drag performed **zero photo renders, mask uploads or
+rasterizations**; release rasterized/uploaded once and created one undo step.
+Native 6000×4000 export completed in ~25 seconds. These are synthetic local
+measurements, not a physical-phone speed guarantee.
 
 ## Detect sky / subject and edit their masks
 

@@ -454,6 +454,27 @@ html, body {
     pointer-events: none;
 }
 
+#polygon-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    display: none;
+}
+
+#add-polygon, #polygon-controls .btn { min-height: 44px; }
+#polygon-controls { margin: 8px 0 12px; }
+#polygon-status { color: var(--text-secondary); font-style: normal; }
+#polygon-controls .btn:disabled { opacity: .45; cursor: default; }
+#polygon-invert[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.polygon-actions, .polygon-feather-row { display: flex; align-items: center; gap: 6px; }
+.polygon-actions { flex-wrap: wrap; }
+.polygon-feather-row { margin: 6px 0; }
+.polygon-feather-row input[type="range"] { flex: 1; min-width: 0; min-height: 44px; }
+.polygon-feather-row input[type="number"] { width: 62px; min-height: 44px; font-size: 16px; }
+#polygon-controls [hidden] { display: none; }
+
 #brush-cursor {
     display: none;
     position: absolute;
@@ -1445,7 +1466,8 @@ input.slider-value:disabled { opacity: .45; }
         overflow: hidden;
     }
 
-    .editor-layout:has(.sidebar-right.mobile-open #panel-review.active) .canvas-area {
+    .editor-layout:has(.sidebar-right.mobile-open #panel-review.active) .canvas-area,
+    .editor-layout:has(.sidebar-right.mobile-open):has(.polygon-mode) .canvas-area {
         margin-bottom: min(50vh, 350px);
     }
 

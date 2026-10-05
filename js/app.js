@@ -577,7 +577,12 @@ class App {
         tools.appendChild(addRadial);
         tools.appendChild(addGradient);
         tools.appendChild(addWand);
+        const addPolygon = this._btn('⬠ Polygon', () => this.polygon.start());
+        addPolygon.id = 'add-polygon';
+        addPolygon.setAttribute('aria-label', 'Polygon mask');
+        tools.appendChild(addPolygon);
         panel.appendChild(tools);
+        this.polygon = new PolygonTool(this, panel);
 
         // AI segmentation tools
         const aiTools = document.createElement('div');
@@ -773,6 +778,7 @@ class App {
         // Delete mask button
         const deleteBtn = this._btn('🗑️ Delete Mask', () => {
             if (this.maskEngine.activeMaskIndex >= 0) {
+                this.polygon?.clear();
                 this._pushHistory();
                 this.maskEngine.deleteMask(this.maskEngine.activeMaskIndex);
                 this._updateMaskList();
@@ -811,6 +817,8 @@ class App {
 
     _addMask(type) {
         if (!this.image) return;
+        if (type === 'polygon') { this.polygon.start(); return; }
+        this.polygon?.clear();
         this._pushHistory();
         this.maskEngine.createMask(type);
         this.review?.invalidate('Mask changed. Request a fresh review when finished.');
@@ -836,6 +844,7 @@ class App {
 
     _exitMaskMode() {
         this.maskMode = false;
+        this.polygon?.clear();
         this.showMaskOverlay = false;
         document.getElementById('canvas-container').classList.remove('mask-mode');
         document.getElementById('main-canvas').style.cursor = 'default';
@@ -858,6 +867,7 @@ class App {
             item.textContent = mask.name || `${mask.type.charAt(0).toUpperCase() + mask.type.slice(1)} Mask ${i + 1}`;
             if (mask.reason) item.title = mask.reason;
             item.addEventListener('click', () => {
+                this.polygon?.clear();
                 this.maskEngine.activeMaskIndex = i;
                 this.maskEngine.tool = mask.type;
                 this.maskMode = true;
@@ -879,6 +889,7 @@ class App {
     }
 
     _syncMaskSliders() {
+        this.polygon?.sync();
         const mask = this.maskEngine.getActiveMask();
         const erase = document.getElementById('mask-erase');
         erase?.classList.toggle('active', this.maskEngine.eraseMode);
@@ -890,7 +901,8 @@ class App {
         if (reason) {
             reason.hidden = !mask?.reason;
             reason.textContent = mask?.reason
-                ? mask.detection ? `${mask.name}: ${mask.reason} Refine with Brush / Erase. Invert selects the background.`
+                ? mask.polygonBaked ? mask.reason
+                    : mask.detection ? `${mask.name}: ${mask.reason} Refine with Brush / Erase. Invert selects the background.`
                     : `${mask.name || 'Adaptive region'}: ${mask.reason} Soft approximation, not a subject outline. Reduce Mask strength or refine position/radii/feather below. Manual changes clear saved AI alternatives so they cannot overwrite your refinement; undo restores the previous edit.` : '';
         }
         if (this.maskGeometryInputs) {
@@ -1067,6 +1079,7 @@ class App {
 
         // Close mobile panel
         const closeMobilePanel = () => {
+            if (this.polygon?.active) this._exitMaskMode();
             document.querySelector('.sidebar-right').classList.remove('mobile-open');
             document.getElementById('mobile-backdrop')?.classList.remove('visible');
             setTimeout(() => this._fitCanvas(), 350);
@@ -1083,6 +1096,7 @@ class App {
 
         // Tap on canvas area to close mobile panel
         document.getElementById('canvas-container')?.addEventListener('click', (e) => {
+            if (this.polygon?.active) return;
             if (Date.now() < (this._suppressCanvasClickUntil || 0)) return;
             if (window.innerWidth <= 700 && document.querySelector('.sidebar-right.mobile-open')) {
                 // Don't close panel when crop tool is active (user is interacting with crop overlay)
@@ -1269,6 +1283,7 @@ class App {
         label.textContent = this._comparisonState ? 'Before review' : 'Original photo';
         label.hidden = false;
         document.getElementById('mask-overlay').style.display = 'none';
+        this.polygon?.draw();
         this._render();
     }
 
@@ -1281,6 +1296,7 @@ class App {
         document.getElementById('compare-label').hidden = true;
         if (wasActive) {
             this._render();
+            this.polygon?.draw();
             if (this.maskMode && this.showMaskOverlay) this._renderMaskOverlay();
         }
     }
@@ -1300,6 +1316,7 @@ class App {
 
     _canvasPointerDown(e) {
         if (!this.maskMode || !this.image) return;
+        if (this.polygon?.active) { this.polygon.down(e); return; }
         this.review?.invalidate('Mask changed. Request a fresh review when finished.');
         this._pushHistory();
         const pos = this._canvasToImage(e);
@@ -1316,6 +1333,7 @@ class App {
 
     _canvasPointerMove(e) {
         if (!this.maskMode || !this.image) return;
+        if (this.polygon?.active) { this.polygon.move(e); return; }
         const pos = this._canvasToImage(e);
         this.maskEngine.handlePointerMove(pos.canvasX, pos.canvasY, pos.imgX, pos.imgY);
         if (this.maskEngine.isDrawing || this.maskEngine._creating) {
@@ -1333,8 +1351,9 @@ class App {
         }
     }
 
-    _canvasPointerUp() {
+    _canvasPointerUp(cancelled = false) {
         if (!this.maskMode) return;
+        if (this.polygon?.active) { this.polygon.up(cancelled); return; }
         this.maskEngine.handlePointerUp();
         this._syncMaskSliders();
         if (this.showMaskOverlay) this._renderMaskOverlay();
@@ -1366,6 +1385,7 @@ class App {
 
     async _loadFile(file, options = {}) {
         this._cancelDetection('Photo changed. Detection cancelled.');
+        if (this.polygon?.active) this._exitMaskMode();
         this.viewport?.cancel();
         this._exportController?.abort();
         this._importController?.abort();
@@ -1728,6 +1748,7 @@ class App {
     // ======================== Actions ========================
 
     _reset() {
+        if (this.polygon?.active) this._exitMaskMode();
         this._cancelDetection('Reset cancelled detection.');
         this._stopComparison();
         this.review?.invalidate('Ready for a fresh review of your photo.');
@@ -1860,6 +1881,7 @@ class App {
             this._detectionStatus('Local detection needs a modern browser over HTTPS or localhost. Brush / Select still work.');
             return;
         }
+        if (this.polygon?.active) this._exitMaskMode();
         this._stopComparison();
         clearTimeout(this._historyDebounce);
         this._pushHistory();
@@ -3255,7 +3277,7 @@ class Library {
                 adjustments: { ...m.adjustments },
                 visible: m.visible,
                 name: m.name, reason: m.reason, blend: m.blend, params: m.params, opacity: m.opacity ?? 1,
-                detection: m.detection, skyPreset: m.skyPreset,
+                detection: m.detection, skyPreset: m.skyPreset, polygonBaked: m.polygonBaked,
                 canvasData: m.canvas.toDataURL('image/png'),
             })),
             timestamp: Date.now(),
@@ -3319,6 +3341,9 @@ class Library {
     async _restoreEdits(photo, editData) {
         if (editData === undefined) editData = await this._readEdits(photo);
         if (editData && editData.state) {
+            if (editData.masks?.some(mask => mask.type === 'polygon' && !PolygonGeometry.validParams(mask.params)))
+                throw new Error('Invalid saved polygon: use 3–64 distinct, non-crossing corners inside the photo.');
+            if (this.app.polygon?.active) this.app._exitMaskMode();
             // Reconstruct source geometry before restoring painted boundaries.
             const crops = editData.sourceCrops || [];
             if (JSON.stringify(crops) !== JSON.stringify(this.app._sourceCrops || [])) {
@@ -3366,12 +3391,19 @@ class Library {
                         mask.inverted = savedMask.inverted;
                         mask.visible = savedMask.visible;
                         mask.name = savedMask.name;
+                        mask.polygonBaked = savedMask.polygonBaked === true;
                         mask.detection = ['sky', 'subject'].includes(savedMask.detection?.kind) ? savedMask.detection : undefined;
                         mask.skyPreset = Object.hasOwn(SemanticMasks.presets, savedMask.skyPreset || '') ? savedMask.skyPreset : undefined;
                         mask.reason = savedMask.reason;
                         mask.blend = savedMask.blend === 'additive' ? 'additive' : undefined;
                         mask.opacity = Number.isFinite(savedMask.opacity) ? Math.max(0, Math.min(1, savedMask.opacity)) : 1;
                         mask.params = savedMask.params;
+
+                        if (mask.type === 'polygon') {
+                            this.app.maskEngine.setPolygon(mask, savedMask.params.points, savedMask.params.feather);
+                            resolve();
+                            return;
+                        }
 
                         // Restore the mask canvas image data
                         if (savedMask.canvasData) {
