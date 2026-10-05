@@ -18,7 +18,7 @@ const { createServer } = require('../server/index.js');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(process.env.BASE_URL || `http://127.0.0.1:${server.address().port}/`);
         await page.waitForFunction(() => window.app?.review);
-        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture }) => {
+        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic }) => {
             const source = document.createElement('canvas');
             source.width = 6000; source.height = 4000;
             const ctx = source.getContext('2d');
@@ -38,6 +38,11 @@ const { createServer } = require('../server/index.js');
                 mask.adjustments.exposure = (i % 2 ? -.2 : .3);
                 if (texture) mask.adjustments.texture = i + 3;
                 if (i > 2) mask.blend = 'additive';
+                if (semantic && i >= 4) {
+                    mask.type = 'brush';
+                    mask.detection = { kind: i === 4 ? 'sky' : 'subject', version: 1 };
+                    mask.name = i === 4 ? 'Sky' : 'Subject';
+                }
             }
             const times = [];
             for (let i = 0; i < 5; i++) {
@@ -91,7 +96,8 @@ const { createServer } = require('../server/index.js');
                 masks: app.maskEngine.masks.map(mask => [mask.canvas.width, mask.canvas.height]),
                 composite: !!document.getElementById('composite-overlay'),
                 glError: app.glEngine.gl.getError(), contextLost: app.glEngine.gl.isContextLost() };
-        }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS, texture: !!process.env.TEXTURE });
+        }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS,
+            texture: !!process.env.TEXTURE, semantic: !!process.env.SEMANTIC });
         console.log(JSON.stringify(metrics));
         assert.deepEqual(errors, []);
         assert.equal(metrics.glError, 0);

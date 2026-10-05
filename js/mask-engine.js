@@ -41,7 +41,8 @@ class MaskEngine {
                 size: [mask.canvas.width, mask.canvas.height],
                 type: mask.type, visible: mask.visible, inverted: mask.inverted,
                 adjustments: { ...mask.adjustments }, params: mask.params,
-                name: mask.name, reason: mask.reason, blend: mask.blend, opacity: mask.opacity ?? 1
+                name: mask.name, reason: mask.reason, blend: mask.blend, opacity: mask.opacity ?? 1,
+                detection: mask.detection, skyPreset: mask.skyPreset
             };
         });
     }
@@ -161,6 +162,25 @@ class MaskEngine {
         return mask;
     }
 
+    cropDetectedMasks({ x, y, width, height, rotation, sourceWidth, sourceHeight }) {
+        return this.masks.filter(mask => mask.detection).map(mask => {
+            const scale = Math.min(1, 2048 / Math.max(width, height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.scale(canvas.width / width, canvas.height / height);
+            ctx.translate(-x + sourceWidth / 2, -y + sourceHeight / 2);
+            ctx.rotate(rotation * Math.PI / 180);
+            ctx.translate(-sourceWidth / 2, -sourceHeight / 2);
+            ctx.drawImage(mask.canvas, 0, 0, sourceWidth, sourceHeight);
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            return { ...mask, canvas, ctx, revision: (mask.revision || 0) + 1, sharedPixels: false };
+        });
+    }
+
     _defaultMaskAdjustments() {
         return {
             exposure: 0, contrast: 0, highlights: 0, shadows: 0,
@@ -210,7 +230,10 @@ class MaskEngine {
         const feather = this.brushFeather / 100;
         const flow = this.brushFlow / 100;
 
-        const gradient = ctx.createRadialGradient(x, y, size * (1 - feather) * 0.5, x, y, size * 0.5);
+        // Coincident radii make a zero-feather brush transparent in Canvas 2D.
+        const radius = size * .5;
+        const gradient = ctx.createRadialGradient(x, y, Math.max(0, Math.min(radius - .001,
+            radius * (1 - feather))), x, y, radius);
         if (this.eraseMode) {
             gradient.addColorStop(0, `rgba(0, 0, 0, ${flow})`);
             gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');

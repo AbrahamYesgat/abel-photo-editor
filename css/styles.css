@@ -1840,3 +1840,7 @@ html, body {
     .toolbar-center #btn-auto, #btn-denoise, #btn-motion { font-size: 11px; padding: 6px 8px; }
     .toolbar-left button, .toolbar-right button { min-width: 44px; justify-content: center; }
 }
+/* Detection controls remain reachable in the phone drawer. */
+#detect-sky, #detect-subject, #detect-cancel, #sky-preset { min-height: 44px; }
+#detect-cancel[hidden], #sky-presets[hidden] { display: none; }
+#sky-preset { display: block; width: 100%; margin-top: 8px; }

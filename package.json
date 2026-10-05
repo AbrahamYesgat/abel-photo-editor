@@ -9,9 +9,11 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node --test",
-    "vendor:raw": "node scripts/vendor-raw.cjs"
+    "vendor:raw": "node scripts/vendor-raw.cjs",
+    "vendor:segmentation": "node scripts/vendor-segmentation.cjs"
   },
   "devDependencies": {
-    "libraw-wasm-nothread": "1.6.0-nothread.1"
+    "libraw-wasm-nothread": "1.6.0-nothread.1",
+    "onnxruntime-web": "1.22.0"
   }
 }

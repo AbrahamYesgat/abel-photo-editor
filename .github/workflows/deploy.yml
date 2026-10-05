@@ -31,6 +31,9 @@ jobs:
           test -f _site/js/night-tools.js
           test -f _site/js/vendor/libraw/libraw.wasm
           test -f _site/js/vendor/libraw/LICENSE
+          test -f _site/js/segmentation-worker.js
+          test -f _site/js/vendor/segmentation/ort-wasm-simd-threaded.wasm
+          test -f _site/js/vendor/segmentation/LICENSE-MODELS.txt
       - uses: actions/upload-pages-artifact@v3
         with:
           path: '_site'

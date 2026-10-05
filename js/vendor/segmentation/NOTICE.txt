@@ -1,0 +1,41 @@
+ABEL local semantic masks
+
+Runtime: ONNX Runtime Web 1.22.0 (Microsoft), MIT.
+See LICENSE-ONNX.txt and ThirdPartyNotices.txt. Rebuild with npm ci and
+npm run vendor:segmentation. integrity.json records the shipped hashes.
+Single-thread WASM runs in a dedicated worker; no WebGPU requirement.
+
+Sky: DETR (Facebook Research), Apache-2.0.
+Original model: https://huggingface.co/facebook/detr-resnet-50-panoptic
+Original code: https://github.com/facebookresearch/detr
+ONNX conversion: Xenova/detr-resnet-50-panoptic, revision
+ea24b2d4e0bfae31f0a1299ba3fb892a2df064de (FP16, 86,559,030 bytes).
+The smaller INT8 export was rejected after real inference produced identical
+query masks. FP16 preserved the distinct sky/mountain masks of FP32.
+COCO panoptic sky-other-merged is category 187 (includes clouds), NOT old
+COCO-Stuff sky-other 157. The converted config's LABEL_187 is incomplete;
+the authoritative taxonomy is:
+https://github.com/cocodataset/panopticapi/blob/7bb4655548f98f3fedc07bf37e9040a992b054b0/panoptic_coco_categories.json
+Mask decoding follows the original DETR PostProcessPanoptic: class confidence
+filter at 0.85, then argmax across raw query mask logits. No blue-color heuristic.
+https://github.com/facebookresearch/detr/blob/29901c51d7fe8712168b8d0d64351170bc0f83e0/models/segmentation.py
+Carion et al., End-to-End Object Detection with Transformers, ECCV 2020.
+
+Subject: U²-Netp (Xuebin Qin et al.), Apache-2.0.
+Original code/weights: https://github.com/xuebinqin/U-2-Net
+Qin et al., U²-Net: Going Deeper with Nested U-Structure for Salient Object
+Detection, Pattern Recognition 106 (2020), 107404.
+Verbatim ONNX mirror of the rembg release: https://huggingface.co/edgetools/u2netp
+Revision 25dee37ab19c5b6ad64ba6578eba63f1ae07720c (4,574,861 bytes).
+Rem bg's surrounding application is not included.
+
+See LICENSE-MODELS.txt (Apache-2.0). Model weights are not bundled or
+redistributed in this repository. They are downloaded by the browser only
+on an explicit detection request from the pinned public Hugging Face URLs
+in js/segmentation.js, SHA-256 verified, and best-effort browser-cached.
+No photo is sent to the model host. No cloud review provider is called.
+The host still sees ordinary asset-request network metadata.
+
+SegFormer ADE20k and BRIA RMBG are deliberately NOT used here: their
+original model licenses restrict use. Subject detection is general
+salient-foreground detection, not portrait-only or an all-object detector.

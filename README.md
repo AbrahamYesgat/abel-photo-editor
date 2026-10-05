@@ -2,6 +2,86 @@
 
 A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Azure OpenAI**, **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent (plus effective clarity/texture baselines only with their respective permissions). Azure forwards these to your Microsoft Azure OpenAI deployment; Gemini forwards them to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
 
+## Detect sky / subject and edit their masks
+
+Open **Masks → Detect sky** or **Detect subject** after importing a photo. These
+are local neural segmentation tools, independent of Azure/Gemini/ChatGPT review:
+**no photo upload, API key, review consent or API charge**. Detection runs only
+when clicked, in a cancellable dedicated worker. Loading/downloading/inference
+status stays visible. Changing the photo, crop or edit discards pending results;
+cancel/error/uncertain output never creates a guessed full-frame mask.
+
+- **Sky** recognizes semantic sky and clouds, rather than selecting blue pixels.
+  **Subject** selects salient foreground (people, pets, objects, etc.), not just
+  portraits; it is not an instance picker and can select multiple prominent
+  objects or miss a less salient subject. Neither guarantees fine branches,
+  hair, haze or complex skyline accuracy. Inspect the overlay.
+- Results are named **Sky** / **Subject**, editable with **Brush**, **Toggle
+  Erase**, feather/flow/size and **Mask strength**. **Invert Mask** selects the
+  complementary background. Other masks and global adjustments are retained.
+  Creation is one undo step; mask pixels/metadata survive Undo/Redo and Library
+  edit storage. Detected brush masks also transform with an applied crop.
+- Select a non-inverted **Sky** mask for **Natural definition**, **Recover bright
+  sky**, **Warm sunset**, **Cool blue hour**, or **Soft atmosphere**. These are
+  local lighting/color looks—not sky replacement or generated scenery. A preset
+  replaces that mask's adjustments with absolute values (no stacking), retaining
+  its painted boundary, inversion and strength. **Reset sky adjustments** zeros
+  only those adjustments; Undo restores the previous manual values. Presets
+  cannot restore clipped detail. Brush-refined boundaries are not re-detected.
+
+**Downloads and memory:** first use fetches ~86.6 MB for sky or ~4.6 MB for
+subject, plus ~12 MB of pinned runtime assets. Model downloads go directly to
+Hugging Face (which sees ordinary asset-request metadata, not photo pixels).
+Weights are revision-pinned, SHA-256 verified and best-effort browser-cached;
+private mode, quota/eviction, connectivity or host availability can prevent reuse.
+Offline use is not guaranteed. No model is loaded at startup or kept resident
+after a detection. Single-thread WASM needs no cross-origin isolation or WebGPU.
+Use HTTPS/localhost and a modern browser. Detection may take seconds to tens
+of seconds; memory-constrained phones can fail and should use Brush / Select.
+Physical iOS memory/performance has not been certified.
+
+Detection uses the **developed, currently cropped source photo**, before tone
+adjustments, so extreme grading does not change recognition. Sky inputs preserve
+aspect ratio (short edge ≤512, long edge ≤768); foreground uses its trained
+320×320 square-resize contract and maps the result back to the source aspect.
+Mask canvases remain capped at 2048 pixels on the long edge.
+
+| Component | Pinned source | License |
+| --- | --- | --- |
+| Sky | `Xenova/detr-resnet-50-panoptic`, `ea24b2d4e0bfae31f0a1299ba3fb892a2df064de`, FP16 ONNX | Apache-2.0 (Facebook DETR) |
+| Subject | `edgetools/u2netp`, `25dee37ab19c5b6ad64ba6578eba63f1ae07720c`, verbatim rembg U²-Netp ONNX | Apache-2.0 (Qin et al.) |
+| Runtime | `onnxruntime-web@1.22.0` | MIT |
+
+Weights are downloaded, not committed/deployed. Vendor runtime assets/licenses
+are reproducible with `npm ci && npm run vendor:segmentation`; see
+`js/vendor/segmentation/NOTICE.txt` and `integrity.json`. SegFormer ADE20k and
+BRIA RMBG are not used because their original model licenses restrict use.
+DETR's smaller INT8 export was rejected after real inference produced degenerate,
+identical query masks. FP16 was verified against FP32 on a real landscape;
+correct COCO panoptic category **187** includes sky/clouds (not the outdated
+COCO-Stuff category 157 in the conversion's incomplete label map).
+
+Validation: `node --test test/segmentation*.test.js`. Opt-in real browser checks:
+`PLAYWRIGHT_MODULE=/path/to/playwright PHOTO=/path/to/photo.jpg KINDS=sky,subject node scripts/check-semantic-masks.cjs`.
+Use `MOBILE=1` for Chromium mobile emulation, `EXPECT_EMPTY=1` for photos without
+the selected region, and `BASE_URL` to check the deployed app. Real tests download
+models but never upload photos or call review providers. Test photos/artifacts
+stay in gitignored `.azure-tools/semantic-validation/`, not the public app.
+`node scripts/fetch-semantic-fixtures.cjs` downloads checksummed, attributed
+Fronalpstock (Hannes Röst, CC BY-SA 3.0), Golden retriever (Denhulde, CC BY-SA
+3.0), and NASA's public-domain Sally Ride portrait; URLs/licenses are in that
+script. Images and derived validation screenshots/masks are not redistributed.
+Real Chromium checks on the development Mac (including mobile emulation) measured
+~12 seconds sky / ~3 seconds subject inference, with responsive UI timers;
+first-use downloads add network time. A coarse hand-traced alpine skyline scored
+~0.959 intersection-over-union in both color and grayscale; cloudy sky was included
+and mountains excluded. The dog and portrait masks were visually checked.
+Preset export comparisons found zero changed non-mask pixels (1-level rounding
+tolerance). These are fixture checks, not universal accuracy claims.
+`SEMANTIC=1 SKIP_EXPORT=1 PLAYWRIGHT_MODULE=/path/to/playwright node scripts/check-mask-performance.cjs`
+checks six masks including two seeded semantic-style brush masks on 24 MP images;
+warm slider/brush updates measured ~30–70 ms, with slower cold initialization.
+
 ## Night clean-up: grain and camera shake are different
 
 Two separate tools sit beside **Auto** (on small screens the editing buttons occupy a second toolbar row):

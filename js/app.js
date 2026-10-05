@@ -220,7 +220,12 @@ class App {
         } else if (category === 'mask') {
             const mask = this.maskEngine.getActiveMask();
             const realKey = key.replace('mask_', '');
-            if (mask) mask.adjustments[realKey] = value;
+            if (mask) {
+                mask.adjustments[realKey] = value;
+                delete mask.skyPreset;
+                const select = document.getElementById('sky-preset');
+                if (select) select.value = '';
+            }
         } else if (category === 'maskOpacity') {
             const mask = this.maskEngine.getActiveMask();
             if (mask) mask.opacity = Math.max(0, Math.min(1, value / 100));
@@ -475,6 +480,7 @@ class App {
     }
 
     _updateNightButtons() {
+        this._syncDetectionButtons();
         const disabled = !this.image || !!this.cropTool?.active || !!this._importController || !!this._exporting;
         this._syncTextureControls();
         for (const id of ['btn-denoise', 'btn-motion']) {
@@ -551,17 +557,30 @@ class App {
         aiTools.className = 'mask-tools';
         aiTools.style.marginBottom = '8px';
 
-        const aiSubject = this._btn('🧠 AI Subject', () => this._aiSelectSubject(false));
-        const aiBg = this._btn('🧠 AI Background', () => this._aiSelectSubject(true));
-        aiTools.appendChild(aiSubject);
-        aiTools.appendChild(aiBg);
+        for (const [kind, label] of [['sky', '☁ Detect sky'], ['subject', '◉ Detect subject']]) {
+            const button = this._btn(label, () => this._detectMask(kind));
+            button.id = `detect-${kind}`;
+            button.disabled = true;
+            aiTools.appendChild(button);
+        }
+        const cancelDetection = this._btn('Cancel detection', () => this._cancelDetection());
+        cancelDetection.id = 'detect-cancel';
+        cancelDetection.hidden = true;
+        aiTools.appendChild(cancelDetection);
         panel.appendChild(aiTools);
+        const detectionInfo = document.createElement('p');
+        detectionInfo.className = 'panel-info';
+        detectionInfo.textContent = 'Local detection, no photo upload or API key. First use downloads ~87 MB (sky) or ~5 MB (subject), plus ~12 MB engine. Subject selects salient foreground, not every object. Boundaries are approximate: refine with Brush / Erase or invert for background.';
+        panel.appendChild(detectionInfo);
 
         const aiStatus = document.createElement('div');
         aiStatus.id = 'ai-status';
         aiStatus.className = 'panel-info';
+        aiStatus.setAttribute('role', 'status');
+        aiStatus.setAttribute('aria-live', 'polite');
         aiStatus.style.display = 'none';
         panel.appendChild(aiStatus);
+        window.addEventListener('pagehide', () => this._cancelDetection());
 
         // Mask list
         const maskList = document.createElement('div');
@@ -582,13 +601,15 @@ class App {
         const eraseBtn = this._btn('Toggle Erase', () => {
             this.maskEngine.eraseMode = !this.maskEngine.eraseMode;
             eraseBtn.classList.toggle('active', this.maskEngine.eraseMode);
+            eraseBtn.setAttribute('aria-pressed', String(this.maskEngine.eraseMode));
         });
         eraseBtn.className = 'btn btn-small';
+        eraseBtn.id = 'mask-erase';
         brushSettings.appendChild(eraseBtn);
 
         const invertBtn = this._btn('Invert Mask', () => {
             const mask = this.maskEngine.getActiveMask();
-            if (mask) { this._pushHistory(); mask.inverted = !mask.inverted; this._render(); this._pushHistory(); }
+            if (mask) { this._pushHistory(); mask.inverted = !mask.inverted; this._syncMaskSliders(); this._render(); this._pushHistory(); }
         });
         invertBtn.className = 'btn btn-small';
         brushSettings.appendChild(invertBtn);
@@ -640,6 +661,25 @@ class App {
         const maskTitle = document.createElement('h4');
         maskTitle.textContent = 'Mask Adjustments';
         maskAdj.appendChild(maskTitle);
+        const skyPresets = document.createElement('div');
+        skyPresets.id = 'sky-presets';
+        skyPresets.hidden = true;
+        const presetLabel = document.createElement('label');
+        presetLabel.textContent = 'Sky preset';
+        const presetSelect = document.createElement('select');
+        presetSelect.id = 'sky-preset';
+        presetSelect.setAttribute('aria-label', 'Sky preset');
+        presetSelect.appendChild(new Option('Choose a sky look…', ''));
+        for (const [key, preset] of Object.entries(SemanticMasks.presets))
+            presetSelect.appendChild(new Option(preset.name, key));
+        presetSelect.addEventListener('change', () => this._applySkyPreset(presetSelect.value));
+        presetLabel.appendChild(presetSelect);
+        skyPresets.appendChild(presetLabel);
+        const presetInfo = document.createElement('p');
+        presetInfo.className = 'panel-info';
+        presetInfo.textContent = 'Replaces only this sky mask’s adjustments; keeps your painted boundary and strength. No sky replacement. Undo restores previous adjustments. Invert back to sky to use presets.';
+        skyPresets.appendChild(presetInfo);
+        maskAdj.appendChild(skyPresets);
         const reviewReason = document.createElement('p');
         reviewReason.id = 'mask-review-reason';
         reviewReason.className = 'panel-info';
@@ -799,15 +839,23 @@ class App {
             });
             list.appendChild(item);
         });
+        this._syncMaskSliders();
     }
 
     _syncMaskSliders() {
         const mask = this.maskEngine.getActiveMask();
+        const erase = document.getElementById('mask-erase');
+        erase?.classList.toggle('active', this.maskEngine.eraseMode);
+        erase?.setAttribute('aria-pressed', String(this.maskEngine.eraseMode));
+        const sky = mask?.detection?.kind === 'sky' && !mask.inverted;
+        document.getElementById('sky-presets').hidden = !sky;
+        document.getElementById('sky-preset').value = sky ? (mask.skyPreset || '') : '';
         const reason = document.getElementById('mask-review-reason');
         if (reason) {
             reason.hidden = !mask?.reason;
             reason.textContent = mask?.reason
-                ? `${mask.name || 'Adaptive region'}: ${mask.reason} Soft approximation, not a subject outline. Reduce Mask strength or refine position/radii/feather below. Manual changes clear saved AI alternatives so they cannot overwrite your refinement; undo restores the previous edit.` : '';
+                ? mask.detection ? `${mask.name}: ${mask.reason} Refine with Brush / Erase. Invert selects the background.`
+                    : `${mask.name || 'Adaptive region'}: ${mask.reason} Soft approximation, not a subject outline. Reduce Mask strength or refine position/radii/feather below. Manual changes clear saved AI alternatives so they cannot overwrite your refinement; undo restores the previous edit.` : '';
         }
         if (this.maskGeometryInputs) {
             document.getElementById('mask-geometry').hidden = mask?.type !== 'radial' || !mask.params;
@@ -1268,11 +1316,13 @@ class App {
     }
 
     async _loadFile(file, options = {}) {
+        this._cancelDetection('Photo changed. Detection cancelled.');
         this.viewport?.cancel();
         this._exportController?.abort();
         this._importController?.abort();
         const controller = this._importController = new AbortController();
         this._updateNightButtons();
+        this._syncDetectionButtons();
         this._stopComparison();
         if (this.review) this.review.elements.consent.checked = false;
         this.review?.invalidate('Loading a new photo. Review it once it is ready.');
@@ -1291,6 +1341,7 @@ class App {
             this._preCropSnapshot = null;
             ImageImport.release(this.image);
             this.image = img;
+            this._sourceCrops = [];
             this.imageWidth = img.naturalWidth || img.width;
             this.imageHeight = img.naturalHeight || img.height;
             this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
@@ -1520,6 +1571,8 @@ class App {
     // ======================== History ========================
 
     _pushHistory(force = false) {
+        if (this._detection && this._detection.signature !== this._detectionSignature())
+            this._cancelDetection('Edit changed. Detection cancelled; detect again when ready.');
         const signature = JSON.stringify({
             size: [this.imageWidth, this.imageHeight], state: this.state, masks: this.maskEngine.describeMasks()
         });
@@ -1556,12 +1609,14 @@ class App {
     }
 
     _undo() {
+        this._cancelDetection('Undo cancelled detection.');
         this._stopComparison();
         clearTimeout(this._historyDebounce);
         this._pushHistory();
         // If a crop was just applied, undo it by restoring the original image
         if (this._preCropImage && this.historyIndex <= this._preCropHistoryIndex) {
             this.image = this._preCropImage;
+            this._sourceCrops = this._preCropCrops || [];
             this.imageWidth = this._preCropWidth;
             this.imageHeight = this._preCropHeight;
             this.glEngine.loadImage(this.image);
@@ -1588,6 +1643,7 @@ class App {
     }
 
     _redo() {
+        this._cancelDetection('Redo cancelled detection.');
         this._stopComparison();
         clearTimeout(this._historyDebounce);
         this._pushHistory();
@@ -1623,6 +1679,7 @@ class App {
     // ======================== Actions ========================
 
     _reset() {
+        this._cancelDetection('Reset cancelled detection.');
         this._stopComparison();
         this.review?.invalidate('Ready for a fresh review of your photo.');
         clearTimeout(this._historyDebounce);
@@ -1712,142 +1769,147 @@ class App {
 
     // ======================== AI Segmentation ========================
 
-    async _aiSelectSubject(invert) {
-        if (!this.image) return;
-        if (this._aiRunning) return;
-        this._aiRunning = true;
-        const statusEl = document.getElementById('ai-status');
-        statusEl.style.display = 'block';
-        statusEl.style.color = 'var(--accent)';
+    _detectionSignature() {
+        return JSON.stringify({ size: [this.imageWidth, this.imageHeight],
+            state: this.state, curves: this.curveEditor?.channels, masks: this.maskEngine.describeMasks() });
+    }
 
-        try {
-            // Load Transformers.js (promise cached to prevent double downloads)
-            if (!this._transformersPromise) {
-                statusEl.textContent = '⏳ Loading AI engine...';
-                this._transformersPromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3');
-            }
-            window._transformers = await this._transformersPromise;
+    _detectionStatus(text) {
+        const element = document.getElementById('ai-status');
+        if (!element) return;
+        element.style.display = 'block';
+        element.textContent = text;
+    }
 
-            // Create pipeline (promise cached)
-            if (!this._segPipelinePromise) {
-                statusEl.textContent = '⏳ Downloading AI model (~40MB, cached after first use)...';
-                const { pipeline } = window._transformers;
-                this._segPipelinePromise = pipeline('background-removal', 'briaai/RMBG-1.4', { dtype: 'fp32' });
-            }
-            this._segPipeline = await this._segPipelinePromise;
-
-            statusEl.textContent = '⏳ Analyzing image...';
-            await new Promise(r => setTimeout(r, 50));
-
-            // Prepare image blob
-            const maxDim = 1024;
-            let sw = this.imageWidth, sh = this.imageHeight;
-            if (sw > maxDim || sh > maxDim) {
-                const s = maxDim / Math.max(sw, sh);
-                sw = Math.round(sw * s);
-                sh = Math.round(sh * s);
-            }
-            const tmpCanvas = document.createElement('canvas');
-            tmpCanvas.width = sw;
-            tmpCanvas.height = sh;
-            tmpCanvas.getContext('2d').drawImage(this.image, 0, 0, sw, sh);
-            const blob = await new Promise(r => tmpCanvas.toBlob(r, 'image/png'));
-            const url = URL.createObjectURL(blob);
-
-            // Run model
-            const result = await this._segPipeline(url);
-            URL.revokeObjectURL(url);
-
-            // Extract: result is an array with one RawImage
-            const img = Array.isArray(result) ? result[0] : result;
-
-            // Draw to canvas to get RGBA pixels
-            let rawCanvas;
-            if (img.toCanvas) {
-                rawCanvas = img.toCanvas();
-            } else if (img.width && img.data) {
-                rawCanvas = document.createElement('canvas');
-                rawCanvas.width = img.width;
-                rawCanvas.height = img.height;
-                const ctx = rawCanvas.getContext('2d');
-                const id = ctx.createImageData(img.width, img.height);
-                const ch = img.channels || 4;
-                if (ch === 4) {
-                    id.data.set(new Uint8ClampedArray(img.data.buffer || img.data));
-                } else {
-                    for (let i = 0; i < img.width * img.height; i++) {
-                        for (let c = 0; c < Math.min(ch, 3); c++) id.data[i*4+c] = img.data[i*ch+c];
-                        id.data[i*4+3] = ch >= 4 ? img.data[i*ch+3] : 255;
-                    }
-                }
-                ctx.putImageData(id, 0, 0);
-            } else {
-                throw new Error('Cannot read model output');
-            }
-
-            const rw = rawCanvas.width, rh = rawCanvas.height;
-            const rawCtx = rawCanvas.getContext('2d');
-            const rawData = rawCtx.getImageData(0, 0, rw, rh).data;
-
-            // Detect if mask is in alpha or RGB
-            let useAlpha = false;
-            for (let i = 0; i < Math.min(rw * rh, 500); i++) {
-                if (rawData[i * 4 + 3] < 250) { useAlpha = true; break; }
-            }
-
-            // Build grayscale mask canvas
-            const maskCanvas = document.createElement('canvas');
-            maskCanvas.width = rw;
-            maskCanvas.height = rh;
-            const maskCtx = maskCanvas.getContext('2d');
-            const maskImgData = maskCtx.createImageData(rw, rh);
-
-            for (let i = 0; i < rw * rh; i++) {
-                let val = useAlpha ? rawData[i*4+3] : Math.round(0.299*rawData[i*4] + 0.587*rawData[i*4+1] + 0.114*rawData[i*4+2]);
-                if (invert) val = 255 - val;
-                maskImgData.data[i*4] = val;
-                maskImgData.data[i*4+1] = val;
-                maskImgData.data[i*4+2] = val;
-                maskImgData.data[i*4+3] = 255;
-            }
-            maskCtx.putImageData(maskImgData, 0, 0);
-
-            // Create mask and draw AI result onto it
-            this.maskEngine.createMask('wand');
-            const newMask = this.maskEngine.getActiveMask();
-            if (newMask) {
-                newMask.ctx.drawImage(maskCanvas, 0, 0, newMask.canvas.width, newMask.canvas.height);
-                this.maskEngine.touch(newMask);
-            }
-
-            // Enter mask editing mode
-            this.maskMode = true;
-            this.showMaskOverlay = true;
-            this._updateMaskList();
-            this._syncMaskSliders();
-            document.getElementById('wand-settings').style.display = 'none';
-            document.getElementById('brush-settings').style.display = 'none';
-            document.getElementById('mask-adjustments').style.display = 'block';
-            document.getElementById('delete-mask-btn').style.display = 'block';
-            document.getElementById('mask-done-btn').style.display = 'block';
-            document.getElementById('mask-toggle-overlay').style.display = '';
-            document.getElementById('canvas-container').classList.add('mask-mode');
-
-            if (this.showMaskOverlay) this._renderMaskOverlay();
-            this._render();
-            this._pushHistory();
-
-            statusEl.textContent = invert ? '✅ Background selected' : '✅ Subject selected';
-            statusEl.style.color = '#22c55e';
-            setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
-        } catch (e) {
-            console.error('AI segmentation error:', e);
-            statusEl.textContent = '❌ ' + (e.message || 'AI model failed');
-            statusEl.style.color = '#ef4444';
-            setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
-        } finally {
-            this._aiRunning = false;
+    _syncDetectionButtons() {
+        const disabled = !this.image || !!this._detection || !!this._importController ||
+            !!this.cropTool?.active || !!this._exporting;
+        for (const kind of ['sky', 'subject']) {
+            const button = document.getElementById(`detect-${kind}`);
+            if (button) button.disabled = disabled;
         }
+        const cancel = document.getElementById('detect-cancel');
+        if (cancel) cancel.hidden = !this._detection;
+    }
+
+    _cancelDetection(text = 'Detection cancelled. Photo and masks unchanged.') {
+        const task = this._detection;
+        if (task) {
+            task.worker.terminate();
+            clearTimeout(task.timeout);
+            clearInterval(task.guard);
+            this._detection = null;
+            this._detectionStatus(text);
+        }
+        this._syncDetectionButtons();
+    }
+
+    _detectMask(kind) {
+        if (!SemanticMasks.models[kind] || !this.image || this._detection ||
+            this._importController || this.cropTool?.active || this._exporting) return;
+        if (typeof Worker === 'undefined' || !globalThis.isSecureContext) {
+            this._detectionStatus('Local detection needs a modern browser over HTTPS or localhost. Brush / Select still work.');
+            return;
+        }
+        this._stopComparison();
+        clearTimeout(this._historyDebounce);
+        this._pushHistory();
+        let worker;
+        try {
+            // Detect the developed, currently cropped photo; tone edits do not alter model colors.
+            const size = SemanticMasks.sizeFor(kind, this.imageWidth, this.imageHeight);
+            const canvas = document.createElement('canvas');
+            canvas.width = size.width; canvas.height = size.height;
+            const context = canvas.getContext('2d');
+            context.drawImage(this.image, 0, 0, size.width, size.height);
+            const rgba = context.getImageData(0, 0, size.width, size.height).data;
+            worker = new Worker(new URL('js/segmentation-worker.js?v=semantic-1', document.baseURI), { type: 'module' });
+            const task = this._detection = { worker, kind, image: this.image, signature: this._detectionSignature() };
+            const current = () => this._detection === task && this.image === task.image &&
+                !this.cropTool?.active && task.signature === this._detectionSignature();
+            task.guard = setInterval(() => {
+                if (this._detection === task && !current())
+                    this._cancelDetection('Edit changed. Detection cancelled; detect again when ready.');
+            }, 250);
+            task.timeout = setTimeout(() => {
+                if (this._detection === task) this._cancelDetection(
+                    'Detection timed out. Retry on a faster device/connection, or use Brush / Select.');
+            }, 180000);
+            worker.onmessage = ({ data }) => {
+                if (this._detection !== task) return;
+                if (!current()) { this._cancelDetection('Edit changed. Result discarded; detect again.'); return; }
+                if (data.type === 'status') { this._detectionStatus(data.text); return; }
+                if (data.type === 'error') { this._cancelDetection(data.text); return; }
+                if (data.type !== 'result') return;
+                this._cancelDetection();
+                if (!SemanticMasks.reliable(data)) {
+                    this._detectionStatus(`No reliable ${kind} found. Photo and masks unchanged.`); return;
+                }
+                const before = { masks: this.maskEngine.masks.slice(), active: this.maskEngine.activeMaskIndex,
+                    nextId: this.maskEngine._nextMaskId, history: this.history.slice(), historyIndex: this.historyIndex };
+                try {
+                    const seed = document.createElement('canvas');
+                    seed.width = data.width; seed.height = data.height;
+                    seed.getContext('2d').putImageData(new ImageData(SemanticMasks.rgbaMask(data.alpha), data.width, data.height), 0, 0);
+                    const staging = new MaskEngine(this);
+                    staging._nextMaskId = this.maskEngine._nextMaskId;
+                    const mask = staging.createMask('brush');
+                    mask.ctx.drawImage(seed, 0, 0, mask.canvas.width, mask.canvas.height);
+                    staging.touch(mask);
+                    mask.name = kind === 'sky' ? 'Sky' : 'Subject';
+                    mask.detection = { kind, model: SemanticMasks.models[kind].label, version: 1 };
+                    mask.reason = kind === 'sky' ? 'Locally detected semantic sky; fine branches and horizons may need refinement.' :
+                        'Locally detected salient foreground; may include several objects or miss a less prominent subject.';
+                    mask.blend = 'additive';
+                    mask.sharedPixels = true;
+                    this._pushHistory();
+                    this.maskEngine.masks.push(mask);
+                    this.maskEngine._nextMaskId = staging._nextMaskId;
+                    this.maskEngine.activeMaskIndex = this.maskEngine.masks.length - 1;
+                    this.maskEngine.eraseMode = false;
+                    this.review?.invalidate('Detected mask added. Saved AI alternatives cleared to preserve your edit.');
+                    this._pushHistory();
+                    this._updateMaskList();
+                    document.querySelector('#mask-list .mask-item:last-child')?.click();
+                    this._render();
+                    this._detectionStatus(`${mask.name} mask ready · ${(data.milliseconds / 1000).toFixed(1)}s inference. Refine with Brush / Erase${kind === 'sky' ? ' or choose a sky preset' : ''}.`);
+                } catch {
+                    this.maskEngine.masks = before.masks;
+                    this.maskEngine.activeMaskIndex = before.active;
+                    this.maskEngine._nextMaskId = before.nextId;
+                    this.history = before.history;
+                    this.historyIndex = before.historyIndex;
+                    this._updateMaskList();
+                    this._updateHistoryButtons();
+                    this._detectionStatus('Could not create mask. Try a smaller photo or free browser memory.');
+                }
+            };
+            worker.onerror = event => {
+                event.preventDefault();
+                if (this._detection === task) this._cancelDetection('Local detection could not start. Check your connection/browser support and retry.');
+            };
+            this._detectionStatus('Loading local detection engine…');
+            this._syncDetectionButtons();
+            worker.postMessage({ kind, ...size, rgba }, [rgba.buffer]);
+        } catch {
+            worker?.terminate();
+            this._cancelDetection();
+            this._detectionStatus('Local detection unavailable. Try a modern browser or use Brush / Select.');
+        }
+    }
+
+    _applySkyPreset(key) {
+        const mask = this.maskEngine.getActiveMask(), preset = SemanticMasks.presets[key];
+        if (!preset || mask?.detection?.kind !== 'sky' || mask.inverted) return;
+        const adjustments = { ...this.maskEngine._defaultMaskAdjustments(), ...preset.adjustments };
+        if (JSON.stringify(adjustments) === JSON.stringify(mask.adjustments) && mask.skyPreset === key) return;
+        this._pushHistory();
+        mask.adjustments = adjustments;
+        mask.skyPreset = key;
+        this.review?.invalidate('Sky preset applied. Saved AI alternatives cleared to preserve your edit.');
+        this._syncMaskSliders();
+        this._render();
+        this._pushHistory();
     }
 
     _showExportModal() {
@@ -2356,9 +2418,11 @@ class CropTool {
 
     activate() {
         if (!this.app.image) return;
+        this.app._cancelDetection('Crop opened. Detection cancelled.');
         this.app.viewport?.reset();
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
         this.active = true;
+        this.app._syncDetectionButtons();
         this.app._updateNightButtons();
         this.app.review?.updateButtons();
         this.rotation = 0;
@@ -2394,6 +2458,7 @@ class CropTool {
     }
 
     deactivate() {
+        this.app._cancelDetection('Crop changed. Detection cancelled.');
         this.active = false;
         this._cropTouch = null;
         this._cropMultitouch = false;
@@ -2696,6 +2761,7 @@ class CropTool {
         this.app._preCropImage = this.app.image;
         this.app._preCropWidth = this.app.imageWidth;
         this.app._preCropHeight = this.app.imageHeight;
+        this.app._preCropCrops = this.app._sourceCrops || [];
 
         const iw = this.app.imageWidth;
         const ih = this.app.imageHeight;
@@ -2707,6 +2773,10 @@ class CropTool {
         const sy = Math.round(this.cropY * workH);
         const sw = Math.round(this.cropW * workW);
         const sh = Math.round(this.cropH * workH);
+        const detectedMasks = this.app.maskEngine.cropDetectedMasks({
+            x: sx, y: sy, width: sw, height: sh, rotation: Math.abs(this.rotation) < .1 ? 0 : this.rotation,
+            sourceWidth: iw, sourceHeight: ih,
+        });
 
         const out = document.createElement('canvas');
         out.width = sw;
@@ -2744,6 +2814,11 @@ class CropTool {
             URL.revokeObjectURL(cropURL);
             if (this.app.image !== sourceImage) return;
             this.app.image = newImg;
+            this.app._sourceCrops = [...this.app._preCropCrops, {
+                x: sx, y: sy, width: sw, height: sh,
+                rotation: Math.abs(sourceRotation) < .1 ? 0 : sourceRotation,
+                sourceWidth: iw, sourceHeight: ih,
+            }];
             this.app._exportController?.abort();
             this.app.imageWidth = newImg.width;
             this.app.imageHeight = newImg.height;
@@ -2753,10 +2828,12 @@ class CropTool {
             this.app._fitCanvas();
             this.app._hideCompositeOverlay();
 
-            // Clear masks since dimensions changed
-            this.app.maskEngine.masks = [];
-            this.app.maskEngine.activeMaskIndex = -1;
+            // Painted semantic boundaries transform with the source, not the preview.
+            this.app.maskEngine.masks = detectedMasks;
+            this.app.maskEngine.activeMaskIndex = detectedMasks.length ? 0 : -1;
+            this.app._exitMaskMode();
             this.app._updateMaskList();
+            this.app._syncMaskSliders();
             // Keep a cropped baseline at the crop boundary, not a mask-only undo step.
             this.app.history = this.app.history.slice(0, this.app._preCropHistoryIndex);
             this.app.historyIndex = this.app.history.length - 1;
@@ -3105,7 +3182,11 @@ class Library {
         const loaded = await this.app._loadFile(file, { halfSize: editData?.rawHalfSize });
         if (!loaded || request !== this._openRequest) return;
         this.activeIndex = index;
-        await this._restoreEdits(photo, editData);
+        try {
+            await this._restoreEdits(photo, editData);
+        } catch (error) {
+            this.app._importStatus(`Could not restore saved edits: ${error.message}`, true);
+        }
         this._renderFilmstrip();
         this._renderGrid();
     }
@@ -3117,6 +3198,7 @@ class Library {
 
         const editData = {
             rawHalfSize: this.app._rawInfo?.halfSize,
+            sourceCrops: this.app._sourceCrops || [],
             state: JSON.parse(JSON.stringify(this.app.state)),
             masks: this.app.maskEngine.masks.map(m => ({
                 type: m.type,
@@ -3124,13 +3206,15 @@ class Library {
                 adjustments: { ...m.adjustments },
                 visible: m.visible,
                 name: m.name, reason: m.reason, blend: m.blend, params: m.params, opacity: m.opacity ?? 1,
+                detection: m.detection, skyPreset: m.skyPreset,
                 canvasData: m.canvas.toDataURL('image/png'),
             })),
             timestamp: Date.now(),
         };
 
         const defaultState = this.app._defaultState();
-        const isEdited = JSON.stringify(editData.state) !== JSON.stringify(defaultState) || editData.masks.length > 0;
+        const isEdited = JSON.stringify(editData.state) !== JSON.stringify(defaultState) ||
+            editData.masks.length > 0 || editData.sourceCrops.length > 0;
         photo.hasEdits = isEdited;
 
         if (isEdited) {
@@ -3186,6 +3270,37 @@ class Library {
     async _restoreEdits(photo, editData) {
         if (editData === undefined) editData = await this._readEdits(photo);
         if (editData && editData.state) {
+            // Reconstruct source geometry before restoring painted boundaries.
+            const crops = editData.sourceCrops || [];
+            if (JSON.stringify(crops) !== JSON.stringify(this.app._sourceCrops || [])) {
+                if (!Array.isArray(crops) || crops.length > 100) throw new Error('Invalid saved crop geometry.');
+                let source = this.app.image;
+                for (const crop of crops) {
+                    const sw = source.naturalWidth || source.width, sh = source.naturalHeight || source.height;
+                    if (!crop || !['x', 'y', 'width', 'height', 'sourceWidth', 'sourceHeight', 'rotation']
+                        .every(key => Number.isFinite(crop[key])) || crop.sourceWidth !== sw || crop.sourceHeight !== sh ||
+                        crop.x < 0 || crop.y < 0 || crop.width < 1 || crop.height < 1 ||
+                        crop.x + crop.width > sw + 1 || crop.y + crop.height > sh + 1 || Math.abs(crop.rotation) > 45)
+                        throw new Error('Saved crop does not match this photo’s dimensions.');
+                    const canvas = document.createElement('canvas');
+                    canvas.width = crop.width; canvas.height = crop.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.translate(-crop.x + sw / 2, -crop.y + sh / 2);
+                    ctx.rotate(crop.rotation * Math.PI / 180);
+                    ctx.translate(-sw / 2, -sh / 2);
+                    ctx.drawImage(source, 0, 0, sw, sh);
+                    if (source !== this.app.image) { source.width = source.height = 1; }
+                    source = canvas;
+                }
+                if (source !== this.app.image) {
+                    this.app.glEngine.loadImage(source);
+                    ImageImport.release(this.app.image);
+                    this.app.image = source;
+                    this.app.imageWidth = source.width; this.app.imageHeight = source.height;
+                    this.app._sourceCrops = crops;
+                    this.app._fitCanvas();
+                }
+            }
             this.app.state = { ...this.app._defaultState(), ...editData.state };
             this.app._syncSlidersFromState();
 
@@ -3202,6 +3317,8 @@ class Library {
                         mask.inverted = savedMask.inverted;
                         mask.visible = savedMask.visible;
                         mask.name = savedMask.name;
+                        mask.detection = ['sky', 'subject'].includes(savedMask.detection?.kind) ? savedMask.detection : undefined;
+                        mask.skyPreset = Object.hasOwn(SemanticMasks.presets, savedMask.skyPreset || '') ? savedMask.skyPreset : undefined;
                         mask.reason = savedMask.reason;
                         mask.blend = savedMask.blend === 'additive' ? 'additive' : undefined;
                         mask.opacity = Number.isFinite(savedMask.opacity) ? Math.max(0, Math.min(1, savedMask.opacity)) : 1;
