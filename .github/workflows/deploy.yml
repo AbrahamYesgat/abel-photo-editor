@@ -29,6 +29,7 @@ jobs:
           test -f _site/js/review-manual.js
           test -f _site/js/raw-worker.js
           test -f _site/js/night-tools.js
+          test -f _site/js/manual-controls.js
           test -f _site/js/vendor/libraw/libraw.wasm
           test -f _site/js/vendor/libraw/LICENSE
           test -f _site/js/segmentation-worker.js

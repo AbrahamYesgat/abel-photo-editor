@@ -148,9 +148,12 @@ class App {
         lbl.className = 'slider-label';
         lbl.textContent = label;
 
-        const val = document.createElement('span');
+        const val = document.createElement('input');
+        val.type = 'number';
+        val.min = min; val.max = max; val.step = step;
         val.className = 'slider-value';
-        val.textContent = defaultVal;
+        val.value = defaultVal;
+        val.setAttribute('aria-label', `${label} value`);
 
         header.appendChild(lbl);
         header.appendChild(val);
@@ -162,18 +165,40 @@ class App {
         input.step = step;
         input.value = defaultVal;
         input.className = 'slider-input';
+        input.id = `slider-${key}`;
         input.setAttribute('aria-label', label);
+        const commitValue = () => {
+            if (input.disabled) { val.value = input.value; return; }
+            if (val.value === '' || !Number.isFinite(val.valueAsNumber)) {
+                val.value = input.value;
+                return;
+            }
+            const previous = Number(input.value);
+            input.value = Math.max(min, Math.min(max, val.valueAsNumber));
+            val.value = this._formatVal(Number(input.value), step);
+            if (Number(input.value) === previous) return;
+            this._pushHistory();
+            this._onSliderChange(key, Number(input.value), category);
+            clearTimeout(this._historyDebounce);
+            this._pushHistory();
+            this._nightGesture = null;
+        };
+        val.addEventListener('change', commitValue);
+        val.addEventListener('keydown', event => {
+            if (event.key === 'Enter') { commitValue(); val.blur(); }
+            if (event.key === 'Escape') { val.value = input.value; val.blur(); }
+        });
 
         // Double-click to reset
         input.addEventListener('dblclick', () => {
             input.value = defaultVal;
-            val.textContent = this._formatVal(defaultVal, step);
+            val.value = this._formatVal(defaultVal, step);
             this._onSliderChange(key, parseFloat(defaultVal), category);
         });
 
         input.addEventListener('input', () => {
             const v = parseFloat(input.value);
-            val.textContent = this._formatVal(v, step);
+            val.value = this._formatVal(v, step);
 
             // Haptic feedback when crossing zero or returning to default
             if (input._lastVal !== undefined) {
@@ -201,6 +226,15 @@ class App {
     }
 
     _onSliderChange(key, value, category) {
+        if (!Number.isFinite(value)) return;
+        const slider = this.sliders[key];
+        if (slider) value = Math.max(Number(slider.input.min), Math.min(Number(slider.input.max), value));
+        if ((category === 'mask' || category === 'maskOpacity') && !this.maskEngine.getActiveMask()) return;
+        if (category === 'mask' || category === 'maskOpacity') {
+            this._stopComparison();
+            if (this._nightGesture !== key) this._pushHistory();
+            this._nightGesture = key;
+        }
         if (key === 'texture') {
             if (!this.image || this.cropTool?.active || this._importController || this._exporting ||
                 this.state.textureEnabled === false) return;
@@ -254,21 +288,10 @@ class App {
 
     _buildBasicPanel() {
         const panel = document.getElementById('panel-basic');
-        const sliders = [
-            ['Exposure', 'exposure', -5, 5, 0.01, 0],
-            ['Contrast', 'contrast', -100, 100, 1, 0],
-            ['Highlights', 'highlights', -100, 100, 1, 0],
-            ['Shadows', 'shadows', -100, 100, 1, 0],
-            ['Whites', 'whites', -100, 100, 1, 0],
-            ['Blacks', 'blacks', -100, 100, 1, 0],
-            ['Temperature', 'temperature', -100, 100, 1, 0],
-            ['Tint', 'tint', -100, 100, 1, 0],
-            ['Vibrance', 'vibrance', -100, 100, 1, 0],
-            ['Saturation', 'saturation', -100, 100, 1, 0],
-            ['Clarity', 'clarity', -100, 100, 1, 0],
-            ['Dehaze', 'dehaze', -100, 100, 1, 0],
-        ];
-        sliders.forEach(([l, k, mn, mx, s, d]) => this._createSlider(panel, l, k, mn, mx, s, d));
+        for (const [key, c] of Object.entries(ManualControls.controls)) {
+            if (key === 'texture' || key === 'sharpenAmount') continue;
+            this._createSlider(panel, c.label, key, c.min, c.max, c.step, c.defaultValue);
+        }
     }
 
     _buildHSLPanel() {
@@ -488,7 +511,10 @@ class App {
             if (button) button.disabled = disabled;
         }
         for (const key of Object.keys(NightTools.settings())) {
-            if (this.sliders[key]) this.sliders[key].input.disabled = disabled;
+            if (this.sliders[key]) {
+                this.sliders[key].input.disabled = disabled;
+                this.sliders[key].val.disabled = disabled;
+            }
         }
     }
 
@@ -508,6 +534,7 @@ class App {
         texture.checked = this.state.textureEnabled !== false;
         texture.disabled = !this.image || !!this.cropTool?.active || !!this._importController || !!this._exporting;
         this.sliders.texture.input.disabled = texture.disabled || !texture.checked;
+        this.sliders.texture.val.disabled = this.sliders.texture.input.disabled;
     }
 
     _setNight(changes) {
@@ -720,18 +747,27 @@ class App {
         geometry.appendChild(geometryFields);
         maskAdj.appendChild(geometry);
 
-        const maskSliders = [
-            ['Exposure', 'mask_exposure', -5, 5, 0.01, 0],
-            ['Contrast', 'mask_contrast', -100, 100, 1, 0],
-            ['Highlights', 'mask_highlights', -100, 100, 1, 0],
-            ['Shadows', 'mask_shadows', -100, 100, 1, 0],
-            ['Temperature', 'mask_temperature', -100, 100, 1, 0],
-            ['Tint', 'mask_tint', -100, 100, 1, 0],
-            ['Saturation', 'mask_saturation', -100, 100, 1, 0],
-            ['Clarity', 'mask_clarity', -100, 100, 1, 0],
-            ['Texture', 'mask_texture', -100, 100, 1, 0],
-        ];
-        maskSliders.forEach(([l, k, mn, mx, s, d]) => this._createSlider(maskAdj, l, k, mn, mx, s, d, 'mask'));
+        for (const group of ['Light', 'Color', 'Detail']) {
+            const section = document.createElement('details');
+            section.className = 'mask-control-group';
+            section.open = true;
+            const title = document.createElement('summary');
+            title.textContent = group;
+            section.appendChild(title);
+            for (const [key, c] of Object.entries(ManualControls.controls)) {
+                if (c.group !== group) continue;
+                this._createSlider(section, c.label, `mask_${key}`, c.min, c.max, c.step, c.defaultValue, 'mask');
+            }
+            maskAdj.appendChild(section);
+        }
+        const maskNote = document.createElement('p');
+        maskNote.className = 'panel-info';
+        maskNote.textContent = 'Local adjustments add to the global edit inside this mask. Temperature and tint use relative units, not Kelvin. Noise reduction and motion correction are global-only in Detail.';
+        maskAdj.appendChild(maskNote);
+        const reset = this._btn('Reset mask adjustments', () => this._resetMaskAdjustments());
+        reset.id = 'reset-mask-adjustments';
+        reset.className = 'btn btn-small';
+        maskAdj.appendChild(reset);
         panel.appendChild(maskAdj);
 
         // Delete mask button
@@ -866,19 +902,32 @@ class App {
                 }
             }
             this.sliders.mask_opacity.input.value = (mask?.opacity ?? 1) * 100;
-            this.sliders.mask_opacity.val.textContent = Math.round((mask?.opacity ?? 1) * 100);
+            this.sliders.mask_opacity.val.value = Math.round((mask?.opacity ?? 1) * 100);
         }
         const adj = mask ? mask.adjustments : {};
-        const maskKeys = ['exposure', 'contrast', 'highlights', 'shadows', 'temperature', 'tint', 'saturation', 'clarity', 'texture'];
+        const maskKeys = Object.keys(ManualControls.controls);
         for (const key of maskKeys) {
             const sliderKey = 'mask_' + key;
             const slider = this.sliders[sliderKey];
             if (slider) {
                 const val = adj[key] || 0;
                 slider.input.value = val;
-                slider.val.textContent = this._formatVal(val, parseFloat(slider.input.step));
+                slider.val.value = this._formatVal(val, parseFloat(slider.input.step));
             }
         }
+    }
+
+    _resetMaskAdjustments() {
+        const mask = this.maskEngine.getActiveMask();
+        if (!mask) return;
+        this._stopComparison();
+        this._pushHistory();
+        mask.adjustments = this.maskEngine._defaultMaskAdjustments();
+        delete mask.skyPreset;
+        this._syncMaskSliders();
+        this.review?.onRender();
+        this._requestRender(true);
+        this._pushHistory();
     }
 
     _buildPresets() {
@@ -1668,10 +1717,10 @@ class App {
                 const idx = parseInt(parts[1]);
                 const val = this.state[cat]?.[idx] ?? slider.defaultVal;
                 slider.input.value = val;
-                slider.val.textContent = this._formatVal(val, parseFloat(slider.input.step));
+                slider.val.value = this._formatVal(val, parseFloat(slider.input.step));
             } else if (this.state[key] !== undefined) {
                 slider.input.value = this.state[key];
-                slider.val.textContent = this._formatVal(this.state[key], parseFloat(slider.input.step));
+                slider.val.value = this._formatVal(this.state[key], parseFloat(slider.input.step));
             }
         }
     }
@@ -3313,7 +3362,7 @@ class Library {
                         this.app.maskEngine.createMask(savedMask.type);
                         const mask = this.app.maskEngine.getActiveMask();
                         if (!mask) { resolve(); return; }
-                        mask.adjustments = { ...mask.adjustments, ...savedMask.adjustments };
+                        mask.adjustments = ManualControls.normalize(savedMask.adjustments);
                         mask.inverted = savedMask.inverted;
                         mask.visible = savedMask.visible;
                         mask.name = savedMask.name;

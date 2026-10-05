@@ -2,6 +2,60 @@
 
 A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Azure OpenAI**, **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent (plus effective clarity/texture baselines only with their respective permissions). Azure forwards these to your Microsoft Azure OpenAI deployment; Gemini forwards them to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
 
+## Manual controls: whole photo and masks
+
+Masks now expose **Whites, Blacks, Vibrance, Dehaze and Sharpening**, alongside
+the existing local controls. Select any brush, gradient, radial, selection,
+sky or subject mask; expand **Light**, **Color** or **Detail** as needed.
+Whole-photo controls were already available in Basic and Detail.
+
+| Controls | Whole photo | Selected mask |
+| --- | --- | --- |
+| Exposure (−5…+5 EV), Contrast, Highlights, Shadows, Whites, Blacks | Basic | Light |
+| Temperature, Tint, Vibrance, Saturation | Basic | Color |
+| Clarity, Dehaze | Basic | Detail |
+| Texture (−100…+100), Sharpening (0…150) | Detail | Detail |
+| Luminance/color noise reduction, experimental motion correction | Detail | Not available locally |
+| Eight-band HSL, tone curves, three-way color grading | HSL / Curves / Color | Not available locally |
+| Vignette and grain | Effects | Not available locally |
+
+Except exposure and sharpening, the shared sliders use relative −100…+100 units;
+temperature is **not Kelvin**. Drag a slider or type its value and press Enter
+(or leave the field); empty/invalid values are rejected and out-of-range values
+are clamped. Double-click a slider to reset it. **Reset mask adjustments** zeros
+only the selected mask's adjustments, preserving its boundary, strength,
+visibility and inversion. Undo/redo and Library saves retain every control.
+
+Local values are offsets from the global edit. Existing normal masks retain
+their original blending; additive adaptive masks clamp the combined settings
+to supported ranges. Strength zero leaves the global edit unchanged. All
+controls use the same renderer for preview and native-resolution export.
+The global Texture switch does not bypass local Texture. Denoise/motion
+correction remain shared whole-photo preprocessing, not pretend local sliders.
+
+These are Lightroom-style core controls, **not complete Lightroom parity or
+identical processing**. No local noise reduction, point-color tools, healing,
+camera calibration, lens profiles, linear/HDR RAW workflow or proprietary
+Lightroom processing is promised. Dehaze is an approximate RGB adjustment,
+not measured depth recovery; clipped detail cannot be reconstructed.
+AI permissions are unchanged: exposing manual Dehaze and Sharpening does not
+allow review models to set them.
+
+Validation: `node --test test/manual-controls.test.js` and
+`PLAYWRIGHT_MODULE=/path/to/playwright node scripts/check-manual-controls.cjs`
+exercise control coverage, real global/local pixels, unaffected areas,
+history/reset, legacy defaults, save/restore, export and desktop/mobile inputs.
+They make no model requests or downloads.
+
+`MANUAL_CONTROLS=1 SEMANTIC=1 SKIP_EXPORT=1 node scripts/check-mask-performance.cjs`
+checks a 24 MP source with six masks and the newly exposed adjustments.
+Local Chromium measurements (desktop and mobile emulation) were **64–152 ms**
+for warm mask-slider updates and **31–40 ms** for brush movement. Initial
+rendering was slower (~1.4–3.4 seconds); these are fixture measurements, not a
+phone performance guarantee. The small native-export fixture matched the
+preview exactly; the existing combined detail/tile regression stayed within
+2/255 per channel.
+
 ## Detect sky / subject and edit their masks
 
 Open **Masks → Detect sky** or **Detect subject** after importing a photo. These

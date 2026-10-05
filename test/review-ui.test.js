@@ -56,7 +56,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
             listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; },
         },
         ReviewContract, ReviewManual, ReviewJSON: require('../js/review-json.js'), console, setTimeout, clearTimeout, URL, AbortController,
-        Blob, atob, navigator: {},
+        Blob, atob, navigator: {}, ManualControls: require('../js/manual-controls.js'),
     });
     vm.runInContext(readFileSync(path.join(__dirname, '../js/app.js'), 'utf8') + '\nthis.App = App;', context);
     vm.runInContext(readFileSync(path.join(__dirname, '../js/review.js'), 'utf8') + '\nthis.ReviewPanel = ReviewPanel;', context);

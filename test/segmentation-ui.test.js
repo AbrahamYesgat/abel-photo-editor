@@ -22,7 +22,7 @@ function harness() {
     }
     const schedule = fn => { timers.set(++nextTimer, fn); return nextTimer; };
     const context = vm.createContext({ document, window: { addEventListener() {} }, Worker, URL,
-        SemanticMasks, console, Uint8ClampedArray, isSecureContext: true,
+        SemanticMasks, ManualControls: require('../js/manual-controls.js'), console, Uint8ClampedArray, isSecureContext: true,
         ImageData: class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } },
         setTimeout: schedule, setInterval: schedule, clearTimeout: id => timers.delete(id), clearInterval: id => timers.delete(id) });
     vm.runInContext(fs.readFileSync('js/mask-engine.js', 'utf8') + '\nthis.MaskEngine = MaskEngine;', context);

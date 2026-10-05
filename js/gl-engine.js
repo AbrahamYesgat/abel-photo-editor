@@ -598,18 +598,9 @@ class GLEngine {
             return;
         }
         this._initMixer();
-        const adjustments = [adj, ...masks.map(mask => {
-            const merged = { ...adj, showOriginal: false };
-            for (const [key, value] of Object.entries(mask.adjustments)) {
-                if (typeof merged[key] !== 'number') continue;
-                merged[key] += value;
-                const control = ReviewContract.controls[key] || ReviewContract.detailControls[key];
-                if (mask.blend === 'additive' && control) {
-                    merged[key] = Math.max(control.min, Math.min(control.max, merged[key]));
-                }
-            }
-            return merged;
-        })];
+        const adjustments = [adj, ...masks.map(mask => ({
+            ...ManualControls.merge(adj, mask.adjustments, mask.blend === 'additive'), showOriginal: false
+        }))];
         // Reuse unchanged adjusted layers during brush strokes and local slider drags.
         const keys = adjustments.map(value => `${this.region}:${this._curveRevision}:${JSON.stringify(value)}`);
         const targets = [];

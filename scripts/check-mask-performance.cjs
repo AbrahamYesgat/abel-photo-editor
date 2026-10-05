@@ -18,7 +18,7 @@ const { createServer } = require('../server/index.js');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(process.env.BASE_URL || `http://127.0.0.1:${server.address().port}/`);
         await page.waitForFunction(() => window.app?.review);
-        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic }) => {
+        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic, manual }) => {
             const source = document.createElement('canvas');
             source.width = 6000; source.height = 4000;
             const ctx = source.getContext('2d');
@@ -37,6 +37,8 @@ const { createServer } = require('../server/index.js');
                     mask.canvas.height / 2, mask.canvas.width / 4, mask.canvas.height / 2, 80);
                 mask.adjustments.exposure = (i % 2 ? -.2 : .3);
                 if (texture) mask.adjustments.texture = i + 3;
+                if (manual) Object.assign(mask.adjustments, { whites: -12, blacks: 15, dehaze: 10 + i,
+                    vibrance: 20, sharpenAmount: 15, clarity: 8 });
                 if (i > 2) mask.blend = 'additive';
                 if (semantic && i >= 4) {
                     mask.type = 'brush';
@@ -60,7 +62,7 @@ const { createServer } = require('../server/index.js');
             app.showMaskOverlay = true;
             for (let i = 0; i < 5; i++) {
                 const start = performance.now();
-                app._onSliderChange('mask_exposure', .13 + i * .017, 'mask');
+                app._onSliderChange(manual ? 'mask_dehaze' : 'mask_exposure', manual ? 15 + i : .13 + i * .017, 'mask');
                 await new Promise(requestAnimationFrame);
                 app.glEngine.gl.readPixels(0, 0, 1, 1, app.glEngine.gl.RGBA,
                     app.glEngine.gl.UNSIGNED_BYTE, new Uint8Array(4));
@@ -97,13 +99,17 @@ const { createServer } = require('../server/index.js');
                 composite: !!document.getElementById('composite-overlay'),
                 glError: app.glEngine.gl.getError(), contextLost: app.glEngine.gl.isContextLost() };
         }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS,
-            texture: !!process.env.TEXTURE, semantic: !!process.env.SEMANTIC });
+            texture: !!process.env.TEXTURE, semantic: !!process.env.SEMANTIC, manual: !!process.env.MANUAL_CONTROLS });
         console.log(JSON.stringify(metrics));
         assert.deepEqual(errors, []);
         assert.equal(metrics.glError, 0);
         assert.equal(metrics.contextLost, false);
         assert.ok(Math.max(...metrics.render) <= 1600);
         assert.equal(metrics.composite, false);
+        if (process.env.MANUAL_CONTROLS) {
+            assert.ok(Math.max(...metrics.latency.slice(1)) < 1000, 'warm manual mask edits must not stall for seconds');
+            assert.ok(Math.max(...metrics.brushLatency.slice(1)) < 1000, 'warm brush edits must remain responsive');
+        }
         if (!mobile && !process.env.SKIP_EXPORT) {
             assert.equal(metrics.exported.width, 6000);
             assert.equal(metrics.exported.height, 4000);

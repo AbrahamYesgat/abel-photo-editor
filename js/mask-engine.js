@@ -40,7 +40,7 @@ class MaskEngine {
                 id: mask.id, revision: mask.revision || 0,
                 size: [mask.canvas.width, mask.canvas.height],
                 type: mask.type, visible: mask.visible, inverted: mask.inverted,
-                adjustments: { ...mask.adjustments }, params: mask.params,
+                adjustments: ManualControls.normalize(mask.adjustments), params: mask.params,
                 name: mask.name, reason: mask.reason, blend: mask.blend, opacity: mask.opacity ?? 1,
                 detection: mask.detection, skyPreset: mask.skyPreset
             };
@@ -78,6 +78,7 @@ class MaskEngine {
             const ctx = canvas.getContext('2d');
             if (!sharePixels) ctx.drawImage(source, 0, 0);
             const mask = { ...JSON.parse(JSON.stringify(metadata)), canvas, ctx, sharedPixels: sharePixels };
+            mask.adjustments = ManualControls.normalize(mask.adjustments);
             this._snapshots.set(mask, { revision: mask.revision, canvas: source });
             return mask;
         });
@@ -182,12 +183,7 @@ class MaskEngine {
     }
 
     _defaultMaskAdjustments() {
-        return {
-            exposure: 0, contrast: 0, highlights: 0, shadows: 0,
-            whites: 0, blacks: 0, temperature: 0, tint: 0,
-            vibrance: 0, saturation: 0, clarity: 0, texture: 0, dehaze: 0,
-            sharpenAmount: 0,
-        };
+        return ManualControls.defaults();
     }
 
     getActiveMask() {
