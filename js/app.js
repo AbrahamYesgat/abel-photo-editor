@@ -15,7 +15,6 @@ class App {
         this.showingOriginal = false;
         this.maskMode = false;
         this.sliders = {};
-        this.zoom = 'fit';
 
         this._initUI();
         this._bindEvents();
@@ -939,12 +938,7 @@ class App {
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) this._stopComparison();
         });
-        canvas.addEventListener('mousedown', (e) => this._canvasPointerDown(e));
-        canvas.addEventListener('mousemove', (e) => this._canvasPointerMove(e));
-        canvas.addEventListener('mouseup', () => this._canvasPointerUp());
-        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); this._canvasPointerDown(e.touches[0]); }, { passive: false });
-        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); this._canvasPointerMove(e.touches[0]); }, { passive: false });
-        canvas.addEventListener('touchend', () => this._canvasPointerUp());
+        this.viewport = new PhotoViewport(this);
 
         // Export modal
         document.getElementById('export-cancel').addEventListener('click', () => {
@@ -1085,7 +1079,7 @@ class App {
             active = false;
             listeners.forEach(remove => remove());
             listeners = [];
-            if (captured !== null && element.hasPointerCapture?.(captured)) {
+            if (captured !== null && !(delayed && this.viewport) && element.hasPointerCapture?.(captured)) {
                 element.releasePointerCapture(captured);
             }
         };
@@ -1124,7 +1118,7 @@ class App {
         element.addEventListener('pointerdown', event => {
             if (!event.isPrimary) { end(); return; }
             if (event.button !== 0 || !this.image || element.disabled ||
-                (delayed && (this.maskMode || this.cropTool?.active))) return;
+                (delayed && (this.maskMode || this.cropTool?.active || this.viewport?.pointers.size))) return;
             this._stopComparison();
             pointer = event.pointerId;
             touch = event.pointerType === 'touch';
@@ -1237,7 +1231,8 @@ class App {
             const rect = canvas.getBoundingClientRect();
             const scaleX = rect.width / this.imageWidth;
             const cursorSize = this.maskEngine.brushSize * scaleX;
-            this._updateBrushCursor(pos.canvasX, pos.canvasY, cursorSize);
+            const container = document.getElementById('canvas-container').getBoundingClientRect();
+            this._updateBrushCursor(e.clientX - container.left, e.clientY - container.top, cursorSize);
         }
     }
 
@@ -1273,6 +1268,7 @@ class App {
     }
 
     async _loadFile(file, options = {}) {
+        this.viewport?.cancel();
         this._exportController?.abort();
         this._importController?.abort();
         const controller = this._importController = new AbortController();
@@ -1357,6 +1353,14 @@ class App {
         const maskOverlay = document.getElementById('mask-overlay');
         maskOverlay.style.width = w + 'px';
         maskOverlay.style.height = h + 'px';
+        this.viewport?.fit(w, h);
+        if (this.cropTool?.active) {
+            const rect = container.getBoundingClientRect();
+            this.cropTool.overlay.width = rect.width;
+            this.cropTool.overlay.height = rect.height;
+            this.cropTool._canvasRect = { x: (rect.width - w) / 2, y: (rect.height - h) / 2, w, h };
+            this.cropTool._drawOverlay();
+        }
     }
 
     _initResizeHandle() {
@@ -2316,13 +2320,44 @@ class CropTool {
         this.overlay.addEventListener('mousedown', (e) => this._onPointerDown(e));
         window.addEventListener('mousemove', (e) => this._onPointerMove(e));
         window.addEventListener('mouseup', () => this._onPointerUp());
-        this.overlay.addEventListener('touchstart', (e) => { e.preventDefault(); this._onPointerDown(e.touches[0]); }, { passive: false });
-        window.addEventListener('touchmove', (e) => { if (this.dragging) this._onPointerMove(e.touches[0]); }, { passive: false });
-        window.addEventListener('touchend', () => this._onPointerUp());
+        this.overlay.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length !== 1) {
+                this._cropTouch = null;
+                this._onPointerUp();
+                this._cropMultitouch = true;
+            } else if (!this._cropMultitouch) {
+                const touch = e.touches[0];
+                this._cropTouch = { clientX: touch.clientX, clientY: touch.clientY, time: performance.now() };
+            }
+        }, { passive: false });
+        window.addEventListener('touchmove', (e) => {
+            if (this._cropMultitouch || e.touches.length !== 1) return;
+            if (this._cropTouch) this._cropTouch.last = { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
+            if (this._cropTouch && performance.now() - this._cropTouch.time >= 240) {
+                this._onPointerDown(this._cropTouch);
+                this._cropTouch = null;
+            }
+            if (this.dragging) this._onPointerMove(e.touches[0]);
+        }, { passive: false });
+        const endTouch = e => {
+            if (e.type === 'touchend' && this._cropTouch?.last && !this._cropMultitouch) {
+                this._onPointerDown(this._cropTouch);
+                this._onPointerMove(this._cropTouch.last);
+            }
+            this._cropTouch = null;
+            this._onPointerUp();
+            if (!e.touches?.length) this._cropMultitouch = false;
+        };
+        window.addEventListener('touchend', endTouch);
+        window.addEventListener('touchcancel', endTouch);
+        window.addEventListener('blur', endTouch);
     }
 
     activate() {
         if (!this.app.image) return;
+        this.app.viewport?.reset();
+        document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
         this.active = true;
         this.app._updateNightButtons();
         this.app.review?.updateButtons();
@@ -2360,6 +2395,10 @@ class CropTool {
 
     deactivate() {
         this.active = false;
+        this._cropTouch = null;
+        this._cropMultitouch = false;
+        this._onPointerUp();
+        this.app.viewport?.draw();
         this.app._updateNightButtons();
         this.app.review?.updateButtons();
         this.overlay.classList.remove('active');

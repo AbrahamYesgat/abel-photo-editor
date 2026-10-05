@@ -404,6 +404,8 @@ html, body {
 
 /* ===================== Canvas ===================== */
 .canvas-container {
+    overflow: hidden;
+    touch-action: none;
     position: relative;
     display: flex;
     align-items: center;
@@ -413,6 +415,25 @@ html, body {
     flex: 1;
     min-height: 0;
 }
+
+.photo-fit {
+    position: absolute;
+    z-index: 12;
+    top: 8px;
+    right: 8px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 8px;
+    background: rgba(24, 24, 24, .65);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+}
+.photo-fit[hidden] { display: none; }
+.photo-zoomed:not(.mask-mode) #main-canvas { cursor: grab; }
+.photo-zoomed:not(.mask-mode) #main-canvas:active { cursor: grabbing; }
 
 #main-canvas {
     display: none;

@@ -88,6 +88,28 @@ node scripts/check-detail-review.cjs
 
 These use synthetic photos and saved responses, with no model calls. Mobile checks simulate Chromium touch/orientation; they do not certify physical iOS/Safari performance.
 
+## Photo zoom
+
+Pinch the photo with two fingers to zoom continuously from **Fit to 8× Fit**.
+Move both fingers to pan; once zoomed, drag with one finger (or a mouse) to pan.
+Mouse-wheel/trackpad scrolling over the photo zooms around the cursor. The small
+**Fit** button resets the view. Controls never scale with the photo, and browser
+page zoom remains available outside the image viewport.
+
+Mask tools retain single-finger painting/selection; use two fingers to navigate.
+The first 240 ms of a touch stroke are staged until a drag is established (a tap
+paints on release), so a pinch cannot leave an initial brush dot or wand selection.
+Adding a second finger ends an already-established stroke without erasing it.
+After a pinch, lift all fingers before painting or holding to compare again.
+Crop stays fit-only, with multi-touch blocked to protect the crop selection.
+New photos and changed image dimensions reset the view; layout resizing keeps
+zoom with bounded pan. Zoom is preview-only: no edit, undo entry, AI preview crop,
+export change, extra image canvas, or per-gesture shader rerender is introduced.
+
+Run `PLAYWRIGHT_MODULE=/path/to/playwright node scripts/check-photo-zoom.cjs`
+for genuine Chromium multi-touch, mask/crop/compare, viewport-only rendering and
+export/AI-preview regressions. `BASE_URL` also checks deployed assets without inference.
+
 ## Azure OpenAI premium review
 
 Select **Azure OpenAI — Premium cloud** in Review. This uses the same intent-first photographic critique and detailed image/region audit as Gemini, with independent Global and Adaptive recipes, adjustable strength, review-only or one-click application, full validation, one-step undo and comparison. The model proposes permitted lighting/color settings, optionally bounded clarity and independently permitted texture, and approximate soft geometry; it does **not** generate replacement pixels or perform subject segmentation.
