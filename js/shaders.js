@@ -52,6 +52,9 @@ uniform vec3 u_cgMidtonesCol;
 uniform float u_cgMidtonesBlend;
 uniform vec3 u_cgHighlightsCol;
 uniform float u_cgHighlightsBlend;
+uniform int u_cgTonal;
+uniform float u_cgBlending;
+uniform float u_cgBalance;
 
 // Sharpening
 uniform float u_sharpenAmount;
@@ -287,19 +290,38 @@ void main() {
 
     // ---- 11. Color Grading ----
     lum = luminance(clamp(color, 0.0, 1.0));
-    float cgSW = pow(1.0 - smoothstep(0.0, 0.4, lum), 1.5);
-    float cgMW = 1.0 - pow(abs(lum - 0.5) * 2.0, 1.5);
-    cgMW = max(cgMW, 0.0);
-    float cgHW = pow(smoothstep(0.6, 1.0, lum), 1.5);
+    if (u_cgTonal == 1) {
+        float zone = clamp(lum - u_cgBalance * 0.25, 0.0, 1.0);
+        float width = 0.08 + u_cgBlending * 0.30;
+        float sw = 1.0 - smoothstep(0.30 - width, 0.30 + width, zone);
+        float hw = smoothstep(0.70 - width, 0.70 + width, zone);
+        float mw = max(0.0, 1.0 - sw - hw);
+        vec3 delta = (u_cgShadowsCol * sw + u_cgMidtonesCol * mw + u_cgHighlightsCol * hw)
+            / (sw + mw + hw) * min(lum, 1.0 - lum) * 0.75;
+        // One common scale preserves luminance and hue at gamut boundaries.
+        vec3 room = vec3(1.0);
+        if (delta.r > 0.0) room.r = (1.0 - color.r) / delta.r;
+        else if (delta.r < 0.0) room.r = -color.r / delta.r;
+        if (delta.g > 0.0) room.g = (1.0 - color.g) / delta.g;
+        else if (delta.g < 0.0) room.g = -color.g / delta.g;
+        if (delta.b > 0.0) room.b = (1.0 - color.b) / delta.b;
+        else if (delta.b < 0.0) room.b = -color.b / delta.b;
+        color += delta * clamp(min(room.r, min(room.g, room.b)), 0.0, 1.0);
+    } else {
+        float cgSW = pow(1.0 - smoothstep(0.0, 0.4, lum), 1.5);
+        float cgMW = 1.0 - pow(abs(lum - 0.5) * 2.0, 1.5);
+        cgMW = max(cgMW, 0.0);
+        float cgHW = pow(smoothstep(0.6, 1.0, lum), 1.5);
 
-    if (u_cgShadowsBlend > 0.0) {
-        color = mix(color, color * u_cgShadowsCol, cgSW * u_cgShadowsBlend);
-    }
-    if (u_cgMidtonesBlend > 0.0) {
-        color = mix(color, color * u_cgMidtonesCol, cgMW * u_cgMidtonesBlend);
-    }
-    if (u_cgHighlightsBlend > 0.0) {
-        color = mix(color, color * u_cgHighlightsCol, cgHW * u_cgHighlightsBlend);
+        if (u_cgShadowsBlend > 0.0) {
+            color = mix(color, color * u_cgShadowsCol, cgSW * u_cgShadowsBlend);
+        }
+        if (u_cgMidtonesBlend > 0.0) {
+            color = mix(color, color * u_cgMidtonesCol, cgMW * u_cgMidtonesBlend);
+        }
+        if (u_cgHighlightsBlend > 0.0) {
+            color = mix(color, color * u_cgHighlightsCol, cgHW * u_cgHighlightsBlend);
+        }
     }
 
     // ---- 12. Sharpening (unsharp mask) ----

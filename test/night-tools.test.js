@@ -51,7 +51,7 @@ test('Wiener inverse reduces error on a known line-blurred signal instead of jus
 test('night actions preserve other settings, are idempotent and have one-step undo/redo', () => {
     const nodes = new Map();
     const context = vm.createContext({
-        NightTools, console, clearTimeout, setTimeout,
+        NightTools, TonalTools: require('../js/tonal-tools.js'), console, clearTimeout, setTimeout,
         document: { addEventListener() {}, getElementById(id) {
             if (!nodes.has(id)) nodes.set(id, {});
             return nodes.get(id);

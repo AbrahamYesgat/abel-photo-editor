@@ -55,7 +55,8 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
             location: { origin: 'http://localhost:3000' }, localStorage: storage,
             listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; },
         },
-        ReviewContract, ReviewManual, ReviewJSON: require('../js/review-json.js'), console, setTimeout, clearTimeout, URL, AbortController,
+        ReviewContract, ReviewManual, TonalTools: require('../js/tonal-tools.js'),
+        ReviewJSON: require('../js/review-json.js'), console, setTimeout, clearTimeout, URL, AbortController,
         Blob, atob, navigator: {}, ManualControls: require('../js/manual-controls.js'),
     });
     vm.runInContext(readFileSync(path.join(__dirname, '../js/app.js'), 'utf8') + '\nthis.App = App;', context);
@@ -66,7 +67,8 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         state: context.App.prototype._defaultState(),
         image: { width: 500, height: 400 }, imageWidth: 500, imageHeight: 400,
         history: [], historyIndex: -1,
-        curveEditor: { channels: { rgb: [{ x: 0, y: 0 }, { x: 255, y: 255 }] } },
+        curveEditor: { draw() {}, channels: Object.fromEntries(['rgb', 'r', 'g', 'b'].map(ch =>
+            [ch, [{ x: 0, y: 0 }, { x: 255, y: 255 }]])) },
         sliders: {},
         glEngine: { loadImage() {} },
         _fitCanvas() {}, _hideCompositeOverlay() {},
@@ -89,6 +91,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
         'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
         'allow-details', 'photo-details', 'allow-texture', 'photo-texture',
+        'allow-grade', 'photo-grade', 'allow-curves', 'photo-curves',
         'consent-text', 'data-terms', 'endpoint', 'token', 'local-endpoint', 'local-token', 'intent',
         'feedback', 'adjustments', 'strength-value', 'alternative',
         'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
@@ -133,6 +136,94 @@ function prepare(review, changes) {
     review.result = reviewFixture(ReviewContract.validateReview(response(changes)));
     review.selection = 'global';
 }
+
+test('cached grade and curves preserve nonzero manual baselines independently across all six variants and undo/redo', () => {
+    const { app, review } = harness({ initialize: true });
+    const tonal = require('../js/tonal-tools.js');
+    app.state.colorGrading.shadows = { hue: 220, saturation: 8 };
+    app.curveEditor.channels.rgb = [{ x: 0, y: 8 }, { x: 128, y: 130 }, { x: 255, y: 245 }];
+    app.curveEditor.channels.r = [{ x: 0, y: 2 }, { x: 255, y: 249 }];
+    const mask = app.maskEngine.createMask('radial');
+    mask.adjustments.exposure = .1;
+    app._pushHistory();
+    const baseline = JSON.parse(JSON.stringify({ state: app.state, curves: app.curveEditor.channels }));
+    review.elements['allow-grade'].checked = review.elements['allow-curves'].checked = true;
+    review.requestPolicy = review.detailRequest();
+    review.context = review.snapshot();
+    const result = response([{ key: 'exposure', value: .3, reason: 'Lift midtones.' }]);
+    for (const [intensity, variant] of Object.entries(result.variants)) {
+        for (const recipe of [variant, variant.adaptive]) {
+            recipe.adjustments = [{ key: 'exposure', value: .3, reason: 'Lift midtones.' }];
+            const settings = JSON.parse(JSON.stringify(baseline.state.colorGrading));
+            settings.highlights = { hue: 40, saturation: { refine: 3, balanced: 6, expressive: 10 }[intensity] };
+            recipe.colorGrading = [{ settings, reason: 'Warm the light.' }];
+            recipe.curves = [{ points: baseline.curves.rgb.map(p => ({
+                x: p.x / 255, y: (p.y + (p.x === 128 ? 2 : 0)) / 255
+            })), reason: 'Subtle midtone lift.' }];
+        }
+    }
+    review.result = ReviewContract.validateReview(result, review.requestPolicy);
+    review.showResult('global');
+    review.apply();
+    assert.equal(review.canCompare(), true);
+    assert.equal(app.state.colorGrading.highlights.saturation, 6);
+    assert.equal(app.curveEditor.channels.rgb[1].y, 132);
+    assert.deepEqual(JSON.parse(JSON.stringify(app.curveEditor.channels.r)), baseline.curves.r);
+    for (const selection of ['global', 'adaptive']) for (const intensity of ReviewContract.intensities) {
+        review.selection = selection; review.intensity = intensity;
+        review.includeGrade = false; review.includeCurves = true; review.apply();
+        assert.deepEqual(JSON.parse(JSON.stringify(app.state.colorGrading)), baseline.state.colorGrading);
+        assert.equal(app.state.exposure, .3);
+        assert.equal(app.curveEditor.channels.rgb[1].y, 132);
+        review.includeGrade = true; review.includeCurves = false; review.apply();
+        assert.deepEqual(JSON.parse(JSON.stringify(app.curveEditor.channels)), baseline.curves);
+        assert.ok(app.state.colorGrading.highlights.saturation > 0);
+        assert.equal(app.maskEngine.masks.length, 1);
+        review.includeGrade = true; review.includeCurves = true; review.apply();
+        const rgb = tonal.interpolate(app.curveEditor.channels.rgb);
+        review.apply();
+        assert.deepEqual(tonal.interpolate(app.curveEditor.channels.rgb), rgb);
+    }
+    const latest = JSON.parse(JSON.stringify({ state: app.state, curves: app.curveEditor.channels }));
+    app._undo();
+    assert.deepEqual(JSON.parse(JSON.stringify({ state: app.state, curves: app.curveEditor.channels })), baseline);
+    app._redo();
+    assert.deepEqual(JSON.parse(JSON.stringify({ state: app.state, curves: app.curveEditor.channels })), latest);
+    review.elements.strength.value = '0'; review.apply();
+    assert.deepEqual(JSON.parse(JSON.stringify({ state: app.state, curves: app.curveEditor.channels })), baseline);
+    app.curveEditor.channels.g[0].y = 5; app._render();
+    assert.equal(review.result, null, 'manual channel change invalidates cached recipes');
+});
+
+test('tonal permissions default off and require a fresh review when changed', () => {
+    const { app, review } = harness({ initialize: true });
+    assert.equal(review.elements['allow-grade'].checked, false);
+    assert.equal(review.elements['allow-curves'].checked, false);
+    const original = JSON.stringify(app.state);
+    prepare(review, []);
+    review.elements['allow-grade'].checked = true;
+    review.elements['allow-grade'].dispatch('change');
+    assert.equal(review.result, null);
+    assert.equal(JSON.stringify(app.state), original);
+});
+
+test('changing either tonal permission aborts in-flight review and discards late automatic application', async () => {
+    for (const name of ['grade', 'curves']) {
+        const { app, review, context } = geminiHarness();
+        let resolve;
+        context.fetch = () => new Promise(done => { resolve = done; });
+        const baseline = JSON.stringify(app.state);
+        const pending = review.analyze();
+        const controller = review.controller;
+        review.elements[`allow-${name}`].checked = true;
+        review.elements[`allow-${name}`].dispatch('change');
+        assert.equal(controller.signal.aborted, true);
+        resolve(Response.json(response([{ key: 'exposure', value: .4, reason: 'Late response.' }])));
+        await pending;
+        assert.equal(review.result, null);
+        assert.equal(JSON.stringify(app.state), baseline);
+    }
+});
 
 test('six saved variants replace one transaction from a frozen masked baseline, including strength and undo/redo', () => {
     const { app, review } = harness();
@@ -1271,7 +1362,7 @@ test('cloud and local reviews use separate endpoints and credentials with identi
         assert.equal(requests[0].headers.Authorization, `Bearer ${provider === 'local' ? 'local' : 'cloud'}-test-token`);
         assert.equal(requests[0].redirect, 'error');
         assert.equal(requests[0].credentials, 'omit');
-        assert.deepEqual(Object.keys(JSON.parse(requests[0].body)).sort(), ['adjustments', 'allowDetails', 'allowTexture', 'image', 'intent']);
+        assert.deepEqual(Object.keys(JSON.parse(requests[0].body)).sort(), ['adjustments', 'allowColorGrading', 'allowCurves', 'allowDetails', 'allowTexture', 'image', 'intent']);
         const image = app.image;
         review.selection = 'global';
         review.apply();
@@ -1437,7 +1528,7 @@ test('only successful validated local reviews persist; cloud credentials and req
             context.ReviewContract = { ...ReviewContract, validateRequest() {} };
             context.fetch = async (url, options) => {
                 assert.equal(options.headers.Authorization, `Bearer ${provider === 'local' ? savedLocal.token : 'synthetic-cloud-token'}`);
-                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowDetails', 'allowTexture', 'detailAdjustments', 'image', 'intent']);
+                assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(), ['adjustments', 'allowColorGrading', 'allowCurves', 'allowDetails', 'allowTexture', 'detailAdjustments', 'image', 'intent']);
                 assert.ok(!options.body.includes('token'));
                 return Response.json(valid ? response([]) : { error: 'Malformed review' });
             };

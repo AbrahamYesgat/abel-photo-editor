@@ -1,9 +1,9 @@
 (function (root, factory) {
     'use strict';
-    const contract = factory();
+    const contract = factory(typeof module === 'object' && module.exports ? require('./tonal-tools.js') : root.TonalTools);
     if (typeof module === 'object' && module.exports) module.exports = contract;
     root.ReviewContract = contract;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (tonal) {
     'use strict';
 
     const controls = {};
@@ -28,6 +28,89 @@
         texture: Object.freeze({ label: 'Texture', min: -100, max: 100, step: 1 })
     });
     const detailLimits = Object.freeze({ refine: 5, balanced: 10, expressive: 15 });
+    const gradeLimits = Object.freeze({ refine: 5, balanced: 10, expressive: 20 });
+    const curveLimits = Object.freeze({ refine: 0.03, balanced: 0.06, expressive: 0.10 });
+    function validateGrading(value) {
+        exact(value, ['enabled', 'blending', 'balance', ...tonal.bands], 'color grading');
+        if (typeof value.enabled !== 'boolean') throw new Error('Invalid grading switch.');
+        const result = { enabled: value.enabled, blending: number(value.blending, 0, 100, 'blending'),
+            balance: number(value.balance, -100, 100, 'balance') };
+        for (const band of tonal.bands) {
+            exact(value[band], ['hue', 'saturation'], `${band} grading`);
+            result[band] = { hue: number(value[band].hue, 0, 360, 'hue'),
+                saturation: number(value[band].saturation, 0, 100, 'grading saturation') };
+        }
+        return result;
+    }
+    function validateCurves(value) {
+        exact(value, ['rgb', 'r', 'g', 'b'], 'current curves');
+        return Object.fromEntries(['rgb', 'r', 'g', 'b'].map(channel => {
+            const points = list(value[channel], 512, 'current curve points', p => {
+                exact(p, ['x', 'y'], 'curve point');
+                return { x: number(p.x, 0, 255, 'curve input'), y: number(p.y, 0, 255, 'curve output') };
+            }, 2);
+            if (points.some((p, i) => i && p.x < points[i - 1].x)) throw new Error('Unsorted current curve.');
+            return [channel, points];
+        }));
+    }
+    function tonalPolicy(request = {}) {
+        for (const [flag, field, validate] of [['allowColorGrading', 'currentColorGrading', validateGrading],
+            ['allowCurves', 'currentCurves', validateCurves]]) {
+            if (request[flag] !== undefined && typeof request[flag] !== 'boolean') throw new Error('Invalid tonal permission.');
+            if (request[flag] === true) validate(request[field]);
+            else if (request[field] !== undefined) throw new Error('Tonal baseline requires explicit permission.');
+        }
+    }
+    function tonalFields(request) {
+        return [request.allowColorGrading ? 'colorGrading' : null, request.allowCurves ? 'curves' : null].filter(Boolean);
+    }
+    function tonalChanges(value, intensity, request) {
+        const result = {};
+        if (request.allowColorGrading) {
+            result.colorGrading = list(value.colorGrading, 1, 'color grading proposals', item => {
+                exact(item, ['settings', 'reason'], 'color grading proposal');
+                const settings = validateGrading(item.settings), baseline = request.currentColorGrading;
+                if (!settings.enabled) throw new Error('AI grading must preserve enabled targets; omit unused grading.');
+                const limit = gradeLimits[intensity];
+                for (const band of tonal.bands) {
+                    const base = baseline.enabled ? baseline[band] : { hue: baseline[band].hue, saturation: 0 };
+                    const a = tonal.tint(base), b = tonal.tint(settings[band]);
+                    if (Math.abs(settings[band].saturation - base.saturation) > limit + 1e-9 ||
+                        a.some((v, i) => Math.abs(v - b[i]) > limit / 100 + 1e-9)) {
+                        throw new Error(`Color grading exceeds ${intensity} bounds.`);
+                    }
+                }
+                for (const key of ['balance', 'blending']) {
+                    if (Math.abs(settings[key] - baseline[key]) > limit * 2) throw new Error('Grading crossover exceeds bounds.');
+                }
+                return { settings, reason: text(item.reason, 400, 'grading reason') };
+            });
+        }
+        if (request.allowCurves) {
+            result.curves = list(value.curves, 1, 'curve proposals', item => {
+                exact(item, ['points', 'reason'], 'curve proposal');
+                const points = list(item.points, 7, 'curve points', p => {
+                    exact(p, ['x', 'y'], 'curve point');
+                    return { x: number(p.x, 0, 1, 'curve input'), y: number(p.y, 0, 1, 'curve output') };
+                }, 2);
+                const baseline = request.currentCurves.rgb;
+                if (points[0].x !== 0 || points.at(-1).x !== 1 ||
+                    Math.abs(points[0].y * 255 - baseline[0].y) > 1e-6 ||
+                    Math.abs(points.at(-1).y * 255 - baseline.at(-1).y) > 1e-6 ||
+                    points.some((p, i) => i && (p.x - points[i - 1].x < 0.05 - 1e-9 || p.y < points[i - 1].y))) {
+                    throw new Error('Curves must preserve endpoints and have separated, monotonic points.');
+                }
+                const a = tonal.interpolate(baseline);
+                const b = tonal.interpolate(points.map(p => ({ x: p.x * 255, y: p.y * 255 })));
+                if (a.some((v, i) => (i && v < a[i - 1]) || Math.abs(v - b[i]) > curveLimits[intensity] * 255 + 1e-9) ||
+                    b.some((v, i) => i && (v < b[i - 1] || v - b[i - 1] > 4))) {
+                    throw new Error(`Rendered curve exceeds safe ${intensity} bounds; omit it.`);
+                }
+                return { points, reason: text(item.reason, 400, 'curve reason') };
+            });
+        }
+        return result;
+    }
     function detailPolicy(request = {}) {
         if (request.allowDetails !== undefined && typeof request.allowDetails !== 'boolean') {
             throw new Error('Invalid detail permission.');
@@ -182,17 +265,21 @@
         fail();
     }
     function validateRequest(value) {
-        const optional = ['allowDetails', 'detailAdjustments', 'allowTexture', 'textureAdjustments']
+        const optional = ['allowDetails', 'detailAdjustments', 'allowTexture', 'textureAdjustments',
+            'allowColorGrading', 'currentColorGrading', 'allowCurves', 'currentCurves']
             .filter(key => value && Object.hasOwn(value, key));
         exact(value, ['image', 'adjustments', 'intent', ...optional], 'request');
         const detail = detailPolicy(value);
         const texture = texturePolicy(value);
+        tonalPolicy(value);
         return {
             image: validateImage(value.image),
             adjustments: currentAdjustments(value.adjustments),
             intent: text(value.intent, 600, 'intent', true),
             ...Object.fromEntries(optional.map(key => [key, key === 'detailAdjustments' ? detail :
-                key === 'textureAdjustments' ? texture : value[key]]))
+                key === 'textureAdjustments' ? texture :
+                key === 'currentColorGrading' ? validateGrading(value[key]) :
+                key === 'currentCurves' ? validateCurves(value[key]) : value[key]]))
         };
     }
     function list(value, max, label, map, min = 0) {
@@ -236,6 +323,7 @@
     }
     function validateReview(value, request = {}) {
         detailPolicy(request);
+        tonalPolicy(request);
         if (value && Object.hasOwn(value, 'adjustments') && !Object.hasOwn(value, 'variants')) {
             throw new Error('This is an older two-recipe review. Update the backend, or export a new prompt and request all three intensities.');
         }
@@ -244,9 +332,14 @@
         exact(value.variants, intensities, 'intensities');
         const variants = Object.fromEntries(intensities.map(intensity => {
             const variant = value.variants[intensity];
-            exact(variant, ['adjustments', 'adaptive'], 'variant');
-            exact(variant.adaptive, ['adjustments', 'regions'], 'adaptive');
+            if (tonalFields(request).some(key => !variant || !Object.hasOwn(variant, key) ||
+                !variant.adaptive || !Object.hasOwn(variant.adaptive, key))) {
+                throw new Error('Missing permitted tonal fields. Request a new review or export a new prompt.');
+            }
+            exact(variant, ['adjustments', 'adaptive', ...tonalFields(request)], 'variant');
+            exact(variant.adaptive, ['adjustments', 'regions', ...tonalFields(request)], 'adaptive');
             const adaptive = {
+                ...tonalChanges(variant.adaptive, intensity, request),
                 adjustments: changes(variant.adaptive.adjustments, globalControls(intensity, request), 6),
                 regions: list(variant.adaptive.regions, MAX_REGIONS, 'regions', item => region(item, intensity, request))
             };
@@ -257,7 +350,8 @@
                     Math.abs(item.adjustments.find(change => change.key === key)?.value || 0), 0);
                 if (total > control.max + 1e-9) throw new Error(`Combined regional ${key} exceeds ${intensity} bounds.`);
             }
-            return [intensity, { adjustments: changes(variant.adjustments, globalControls(intensity, request), 6), adaptive }];
+            return [intensity, { adjustments: changes(variant.adjustments, globalControls(intensity, request), 6),
+                ...tonalChanges(variant, intensity, request), adaptive }];
         }));
         exact(value.inferredIntent, ['genre', 'interpretation', 'intentionalTraits'], 'inferred intent');
         const inferredIntent = {
@@ -314,6 +408,23 @@
         })
     });
     const unitSchema = { type: 'number', minimum: 0, maximum: 1 };
+    const tonalSchema = request => ({
+        ...(request.allowColorGrading ? { colorGrading: { type: 'array', maxItems: 1, items: objectSchema({
+            settings: objectSchema({
+                enabled: { type: 'boolean' },
+                blending: { type: 'number', minimum: 0, maximum: 100 },
+                balance: { type: 'number', minimum: -100, maximum: 100 },
+                ...Object.fromEntries(tonal.bands.map(band => [band, objectSchema({
+                    hue: { type: 'number', minimum: 0, maximum: 360 },
+                    saturation: { type: 'number', minimum: 0, maximum: 100 }
+                })]))
+            }), reason: stringSchema(400)
+        }) } } : {}),
+        ...(request.allowCurves ? { curves: { type: 'array', maxItems: 1, items: objectSchema({
+            points: { type: 'array', minItems: 2, maxItems: 7, items: objectSchema({ x: unitSchema, y: unitSchema }) },
+            reason: stringSchema(400)
+        }) } } : {})
+    });
     const schemaForRequest = (request = {}) => objectSchema({
         rating: scoreSchema,
         summary: stringSchema(1200),
@@ -333,8 +444,10 @@
             reason: stringSchema(400)
         }),
         variants: objectSchema(Object.fromEntries(intensities.map(intensity => [intensity, objectSchema({
+        ...tonalSchema(request),
         adjustments: changeSchema(globalControls(intensity, request), 6),
         adaptive: objectSchema({
+            ...tonalSchema(request),
             adjustments: changeSchema(globalControls(intensity, request), 6),
             regions: { type: 'array', maxItems: MAX_REGIONS, items: objectSchema({
                 name: stringSchema(80), reason: stringSchema(400),
@@ -351,6 +464,7 @@
     const reviewSchema = schemaForRequest();
     return Object.freeze({ controls, readAdjustments, validateRequest, validateReview, reviewSchema,
         detailControls, detailLimits, detailPolicy, texturePolicy, globalControls, schemaForRequest,
+        gradeLimits, curveLimits, tonalPolicy, validateGrading, validateCurves,
         reviewCategories, portfolioVerdicts, maskControls, intensities, regionalLimits,
         regionalControls, MAX_REGIONS, MAX_IMAGE_BYTES });
 });

@@ -8,11 +8,14 @@ class ReviewPanel {
         this.appliedContext = null;
         this.beforeState = null;
         this.beforeMasks = null;
+        this.beforeCurves = null;
         this.beforeContext = null;
         this.selection = '';
         this.intensity = 'balanced';
         this.includeDetails = false;
         this.includeTexture = false;
+        this.includeGrade = false;
+        this.includeCurves = false;
         this.requestPolicy = null;
         this.elements = {};
         this.cloudProvider = document.getElementById('review-provider').value === 'gemini' ? 'gemini' : 'azure';
@@ -28,12 +31,24 @@ class ReviewPanel {
             'manual-choice', 'manual-strength', 'intensity', 'photo-controls', 'photo-mode',
             'photo-strength', 'photo-strength-value', 'photo-state', 'view-photo', 'open-drawer',
             'allow-details', 'photo-details', 'allow-texture', 'photo-texture',
+            'allow-grade', 'photo-grade', 'allow-curves', 'photo-curves',
             'consent-text', 'data-terms', 'alternative',
             'consent-label', 'manual', 'export', 'download-preview', 'copy-prompt',
             'download-prompt', 'prompt', 'paste', 'import', 'fix-quotes']) {
             this.elements[name] = document.getElementById(`review-${name}`);
         }
         const el = this.elements;
+        for (const [name, flag] of [['grade', 'includeGrade'], ['curves', 'includeCurves']]) {
+            el[`allow-${name}`].checked = false;
+            el[`allow-${name}`].addEventListener('change', () => {
+                this.invalidate('Tonal permission changed. Request a new review; existing edits are unchanged.');
+            });
+            el[`photo-${name}`].addEventListener('click', () => {
+                if (!this.hasTonal(name)) return;
+                this[flag] = !this[flag];
+                this.apply(true);
+            });
+        }
         el['allow-details'].checked = true;
         el['allow-details'].addEventListener('change', () => {
             this.invalidate('Detail permission changed. Request a new review; existing edits are unchanged.');
@@ -197,13 +212,24 @@ class ReviewPanel {
     }
 
     detailRequest() {
+        if (this.elements['allow-grade']?.checked && this.app.state.colorGrading?.enabled === undefined) {
+            throw new Error('This photo uses legacy color grading. Keep AI color grading off to preserve it, or choose new manual Color grading settings first.');
+        }
         const clarity = this.elements['allow-details'].checked
             ? { allowDetails: true, detailAdjustments: { clarity: this.app.state.clarity } }
             : { allowDetails: false };
         return { ...clarity, allowTexture: !!this.elements['allow-texture'].checked,
             ...(this.elements['allow-texture'].checked ? { textureAdjustments: {
                 texture: this.app.state.textureEnabled === false ? 0 : this.app.state.texture || 0
-            } } : {}) };
+            } } : {}),
+            allowColorGrading: !!this.elements['allow-grade']?.checked,
+            ...(this.elements['allow-grade']?.checked ? {
+                currentColorGrading: JSON.parse(JSON.stringify(this.app.state.colorGrading))
+            } : {}),
+            allowCurves: !!this.elements['allow-curves']?.checked,
+            ...(this.elements['allow-curves']?.checked ? {
+                currentCurves: JSON.parse(JSON.stringify(this.app.curveEditor.channels))
+            } : {}) };
     }
 
     chooseIntensity(value) {
@@ -591,6 +617,8 @@ class ReviewPanel {
             image: this.app.image,
             allowDetails: !!this.elements['allow-details'].checked,
             allowTexture: !!this.elements['allow-texture'].checked,
+            allowColorGrading: !!this.elements['allow-grade']?.checked,
+            allowCurves: !!this.elements['allow-curves']?.checked,
             edits: JSON.stringify({
                 state: this.app.state,
                 curves: this.app.curveEditor.channels,
@@ -604,7 +632,8 @@ class ReviewPanel {
         if (!context) return false;
         const current = this.snapshot();
         return context.image === current.image && context.edits === current.edits &&
-            context.allowDetails === current.allowDetails && context.allowTexture === current.allowTexture;
+            context.allowDetails === current.allowDetails && context.allowTexture === current.allowTexture &&
+            context.allowColorGrading === current.allowColorGrading && context.allowCurves === current.allowCurves;
     }
 
     canCompare() {
@@ -638,6 +667,7 @@ class ReviewPanel {
         this.appliedContext = null;
         this.beforeState = null;
         this.beforeMasks = null;
+        this.beforeCurves = null;
         this.beforeContext = null;
         this.reviewHistory = null;
         this.baselineHistory = null;
@@ -645,6 +675,8 @@ class ReviewPanel {
         this.requestPolicy = null;
         this.includeDetails = false;
         this.includeTexture = false;
+        this.includeGrade = false;
+        this.includeCurves = false;
         this.selection = '';
         this.elements.alternative.value = '';
         this.elements['apply-bar'].hidden = true;
@@ -704,6 +736,17 @@ class ReviewPanel {
         el['photo-texture'].title = hasTexture
             ? 'Off keeps lighting/color, clarity and your original manual texture, including existing masks. No new AI call.'
             : 'Allow texture before a new review to permit suggestions; they are not guaranteed.';
+        for (const [name, title, flag] of [['grade', 'Grade', 'includeGrade'], ['curves', 'Curves', 'includeCurves']]) {
+            const button = el[`photo-${name}`];
+            if (!button) continue;
+            const has = this.hasTonal(name);
+            button.hidden = !this.appliedContext;
+            button.disabled = busy || !has;
+            button.textContent = has ? `${title}: ${this[flag] ? 'on' : 'off'}` : `No AI ${name} suggested`;
+            button.setAttribute('aria-pressed', String(has && !!this[flag]));
+            button.title = has ? `Off preserves your manual ${name} baseline and all other AI components. No new AI call.`
+                : `Allow AI ${name} before a new review to permit suggestions; they are not guaranteed.`;
+        }
         el['strength-value'].value = `${el.strength.value}%`;
         if (this.appliedContext) {
             el['gemini-strength'].value = el.strength.value;
@@ -915,12 +958,14 @@ class ReviewPanel {
             intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
             allowDetails: !!el['allow-details'].checked,
             allowTexture: !!el['allow-texture'].checked,
+            allowColorGrading: !!el['allow-grade']?.checked, allowCurves: !!el['allow-curves']?.checked,
         });
         const settingsUnchanged = () => requestSettings === JSON.stringify({
             provider: el.provider.value, endpoint: el.endpoint.value, token: el.token.value,
             intent: el.intent.value, mode: el['gemini-mode'].value, strength: el['gemini-strength'].value, intensity: this.intensity,
             allowDetails: !!el['allow-details'].checked,
             allowTexture: !!el['allow-texture'].checked,
+            allowColorGrading: !!el['allow-grade']?.checked, allowCurves: !!el['allow-curves']?.checked,
         });
         try {
             const endpoint = this.endpoint();
@@ -1013,6 +1058,8 @@ class ReviewPanel {
         const result = this.result;
         this.includeDetails = this.requestPolicy?.allowDetails === true;
         this.includeTexture = this.requestPolicy?.allowTexture === true;
+        this.includeGrade = this.requestPolicy?.allowColorGrading === true;
+        this.includeCurves = this.requestPolicy?.allowCurves === true;
         el.feedback.replaceChildren();
         el.feedback.append(this.text('div', `${result.rating.toFixed(1)} / 10`, 'review-rating'));
         el.feedback.append(this.text('p', 'Subjective assessment of the current edit', 'review-note'));
@@ -1043,7 +1090,9 @@ class ReviewPanel {
 
     hasSuggestions() {
         return !!this.result && Object.values(this.result.variants).some(variant =>
-            variant.adjustments.length || variant.adaptive.adjustments.length || variant.adaptive.regions.length);
+            variant.adjustments.length || variant.adaptive.adjustments.length || variant.adaptive.regions.length ||
+            variant.colorGrading?.length || variant.curves?.length ||
+            variant.adaptive.colorGrading?.length || variant.adaptive.curves?.length);
     }
 
     strength() {
@@ -1053,7 +1102,7 @@ class ReviewPanel {
 
     rawProposal() {
         const variant = this.result?.variants[this.intensity || 'balanced'];
-        if (variant && this.selection === 'global') return { adjustments: variant.adjustments, regions: [] };
+        if (variant && this.selection === 'global') return { ...variant, regions: [] };
         if (variant && this.selection === 'adaptive') return variant.adaptive;
         return { adjustments: [], regions: [] };
     }
@@ -1103,7 +1152,38 @@ class ReviewPanel {
     }
 
     hasChanges() {
-        return this.targets().some(change => change.value !== change.from) || this.regions().length > 0;
+        return this.targets().some(change => change.value !== change.from) || this.regions().length > 0 || this.tonalTargets().changed;
+    }
+
+    hasTonal(name) {
+        const field = name === 'grade' ? 'colorGrading' : 'curves';
+        const permission = name === 'grade' ? 'allowColorGrading' : 'allowCurves';
+        return !!this.requestPolicy?.[permission] && !!this.rawProposal()[field]?.length;
+    }
+
+    tonalTargets() {
+        const context = this.beforeContext || this.context;
+        if (!context) return { changed: false };
+        const baseline = JSON.parse(context.edits);
+        const raw = this.rawProposal(), strength = this.strength();
+        const grade = this.includeGrade && this.hasTonal('grade') ? raw.colorGrading[0] : null;
+        const curve = this.includeCurves && this.hasTonal('curves') ? raw.curves[0] : null;
+        const colorGrading = grade ? TonalTools.blendGrade(baseline.state.colorGrading, grade.settings, strength)
+            : baseline.state.colorGrading;
+        const curves = JSON.parse(JSON.stringify(baseline.curves || this.app.curveEditor?.channels || {}));
+        if (curve) curves.rgb = TonalTools.blendCurve(curves.rgb, curve.points, strength);
+        const gradeChanged = !!grade && strength > 0 && (
+            (TonalTools.bands.some(band => colorGrading[band].saturation > 0) &&
+                ['balance', 'blending'].some(key => colorGrading[key] !== baseline.state.colorGrading[key])) ||
+            TonalTools.bands.some(band => {
+                const base = baseline.state.colorGrading;
+                const a = base.enabled ? TonalTools.tint(base[band]) : [0, 0, 0];
+                return TonalTools.tint(colorGrading[band]).some((v, i) => Math.abs(v - a[i]) > 1e-9);
+            }));
+        const baselineLUT = curve && TonalTools.interpolate(baseline.curves.rgb);
+        const curveChanged = !!curve && strength > 0 && TonalTools.interpolate(curves.rgb)
+            .some((v, i) => v !== baselineLUT[i]);
+        return { colorGrading, curves, grade, curve, changed: gradeChanged || curveChanged };
     }
 
     regions() {
@@ -1129,6 +1209,25 @@ class ReviewPanel {
             row.append(this.text('strong', this.control(change.key).label));
             row.append(this.text('span', `${change.from} to ${change.value}`));
             row.append(this.text('p', change.reason));
+            container.append(row);
+        }
+        const tonal = this.tonalTargets();
+        if (tonal.grade && this.strength()) {
+            const row = this.text('div', '', 'review-adjustment');
+            row.append(this.text('strong', 'Color grading — whole image'));
+            for (const band of TonalTools.bands) {
+                const value = tonal.colorGrading[band];
+                row.append(this.text('p', `${band}: ${Math.round(value.hue)}° / ${value.saturation.toFixed(1)} saturation`));
+            }
+            row.append(this.text('p', `Blending ${tonal.colorGrading.blending.toFixed(0)} · Balance ${tonal.colorGrading.balance.toFixed(0)}`));
+            row.append(this.text('p', tonal.grade.reason));
+            container.append(row);
+        }
+        if (tonal.curve && this.strength()) {
+            const row = this.text('div', '', 'review-adjustment');
+            row.append(this.text('strong', 'RGB master curve — whole image'));
+            row.append(this.text('p', tonal.curve.reason));
+            row.append(this.text('p', `Target input → output: ${tonal.curve.points.map(p => `${p.x.toFixed(2)} → ${p.y.toFixed(2)}`).join('; ')}. Strength ${Math.round(this.strength() * 100)}%; R/G/B channels preserved.`));
             container.append(row);
         }
         for (const region of this.regions()) {
@@ -1208,6 +1307,8 @@ class ReviewPanel {
             ReviewContract.validateReview(this.result, this.requestPolicy || {});
             this.app._stopComparison();
             const next = JSON.parse(JSON.stringify(switching ? this.beforeState : this.app.state));
+            const tonal = this.tonalTargets();
+            if (tonal.colorGrading) next.colorGrading = tonal.colorGrading;
             for (const { key, value } of this.targets()) {
                 if (!Object.hasOwn(ReviewContract.globalControls(this.intensity || 'balanced', this.requestPolicy || {}), key)) {
                     throw new Error('Unsupported review adjustment.');
@@ -1225,6 +1326,7 @@ class ReviewPanel {
             const newMasks = this.app.maskEngine.buildReviewMasks(this.regions());
             const beforeMasks = switching ? this.beforeMasks : this.app.maskEngine.captureMasks();
             rollback = { state: this.app.state, masks: this.app.maskEngine.masks,
+                curves: this.app.curveEditor?.channels,
                 history: this.app.history, historyIndex: this.app.historyIndex,
                 appliedContext: this.appliedContext, reviewHistory: this.reviewHistory };
             clearTimeout(this.app._historyDebounce);
@@ -1233,12 +1335,17 @@ class ReviewPanel {
                 this.baselineHistory = this.app.history[this.app.historyIndex];
                 this.beforeState = JSON.parse(JSON.stringify(this.app.state));
                 this.beforeMasks = beforeMasks;
+                this.beforeCurves = this.app.curveEditor ? JSON.parse(JSON.stringify(this.app.curveEditor.channels)) : null;
                 this.beforeContext = this.context;
             }
             const baselineIndex = this.app.history.indexOf(this.baselineHistory);
             if (baselineIndex < 0) throw new Error('Review history is no longer available.');
             if (switching) this.app.maskEngine.restoreMasks(beforeMasks, true);
             this.app.state = next;
+            if (this.app.curveEditor && tonal.curves?.rgb) {
+                this.app.curveEditor.channels = tonal.curves;
+                this.app.curveEditor.draw?.();
+            }
             this.app.maskEngine.masks = [...this.app.maskEngine.masks, ...newMasks];
             this.app.history = this.app.history.slice(0, baselineIndex + 1);
             this.app.historyIndex = baselineIndex;
@@ -1249,15 +1356,20 @@ class ReviewPanel {
             this.context = null;
             this.appliedContext = this.snapshot();
             this.appliedOptions = { intensity: this.intensity || 'balanced', selection: this.selection,
-                strength: this.elements.strength.value, includeDetails: this.includeDetails, includeTexture: this.includeTexture };
+                strength: this.elements.strength.value, includeDetails: this.includeDetails, includeTexture: this.includeTexture,
+                includeGrade: this.includeGrade, includeCurves: this.includeCurves };
             if (interactive) this.app._requestRender();
             else this.app._render();
             this.showAdjustments();
-            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo; ⋯ opens separate Clarity / Texture toggles and strength — no new review. ${this.hasDetails() ? 'AI clarity available.' : 'No AI clarity suggested.'} ${this.hasTexture() ? 'AI texture available.' : 'No AI texture suggested.'} Off preserves your original manual detail. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
+            this.setStatus(`${this.intensity || 'Balanced'} ${this.selection} applied at ${this.elements.strength.value}%. All three intensities are ready beside the photo; ⋯ opens separate Clarity / Texture / Grade / Curves toggles and strength — no new review. Off preserves each component's manual baseline. Undo restores the baseline; Redo restores your latest choice. Rating describes the reviewed baseline.`);
             this.updateButtons();
         } catch (error) {
             if (rollback) {
                 this.app.state = rollback.state;
+                if (this.app.curveEditor && rollback.curves) {
+                    this.app.curveEditor.channels = rollback.curves;
+                    this.app.curveEditor.draw?.();
+                }
                 this.app.maskEngine.masks = rollback.masks;
                 this.app.history = rollback.history;
                 this.app.historyIndex = rollback.historyIndex;
@@ -1266,6 +1378,7 @@ class ReviewPanel {
                 if (!switching) {
                     this.beforeState = null;
                     this.beforeMasks = null;
+                    this.beforeCurves = null;
                     this.beforeContext = null;
                 }
                 this.app._syncSlidersFromState();
@@ -1277,6 +1390,8 @@ class ReviewPanel {
                 this.selection = this.appliedOptions.selection;
                 this.includeDetails = this.appliedOptions.includeDetails;
                 this.includeTexture = this.appliedOptions.includeTexture;
+                this.includeGrade = this.appliedOptions.includeGrade;
+                this.includeCurves = this.appliedOptions.includeCurves;
                 this.elements.alternative.value = this.selection;
                 this.elements.strength.value = this.appliedOptions.strength;
             }

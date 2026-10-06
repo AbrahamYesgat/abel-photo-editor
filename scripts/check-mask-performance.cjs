@@ -18,7 +18,7 @@ const { createServer } = require('../server/index.js');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(process.env.BASE_URL || `http://127.0.0.1:${server.address().port}/`);
         await page.waitForFunction(() => window.app?.review);
-        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic, manual }) => {
+        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic, manual, tonal }) => {
             const source = document.createElement('canvas');
             source.width = 6000; source.height = 4000;
             const ctx = source.getContext('2d');
@@ -31,6 +31,11 @@ const { createServer } = require('../server/index.js');
             if (nightTools) app._setNight({ noiseLuma: 60, noiseColor: 70,
                 motionAmount: 60, motionLength: 8, motionAngle: 20 });
             if (texture) app.state.texture = 40;
+            if (tonal) {
+                app.state.colorGrading.shadows = { hue: 220, saturation: 15 };
+                app.state.colorGrading.highlights = { hue: 40, saturation: 12 };
+                app.curveEditor.channels.rgb = [{ x: 0, y: 3 }, { x: 128, y: 133 }, { x: 255, y: 252 }];
+            }
             for (let i = 0; i < 6; i++) {
                 const mask = app.maskEngine.createMask('radial');
                 app.maskEngine.createRadialMask(mask.canvas.width * (i + 1) / 7,
@@ -94,12 +99,13 @@ const { createServer } = require('../server/index.js');
                 canvas.width = canvas.height = 1;
             }
             app._render();
-            return { mobile, nightTools, texture, times, latency, brushLatency, exported, render: [app.glEngine.canvas.width, app.glEngine.canvas.height],
+            return { mobile, nightTools, texture, tonal, times, latency, brushLatency, exported, render: [app.glEngine.canvas.width, app.glEngine.canvas.height],
                 masks: app.maskEngine.masks.map(mask => [mask.canvas.width, mask.canvas.height]),
                 composite: !!document.getElementById('composite-overlay'),
                 glError: app.glEngine.gl.getError(), contextLost: app.glEngine.gl.isContextLost() };
         }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS,
-            texture: !!process.env.TEXTURE, semantic: !!process.env.SEMANTIC, manual: !!process.env.MANUAL_CONTROLS });
+            texture: !!process.env.TEXTURE, semantic: !!process.env.SEMANTIC, manual: !!process.env.MANUAL_CONTROLS,
+            tonal: !!process.env.TONAL_TOOLS });
         console.log(JSON.stringify(metrics));
         assert.deepEqual(errors, []);
         assert.equal(metrics.glError, 0);

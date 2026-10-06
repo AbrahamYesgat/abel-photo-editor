@@ -132,6 +132,8 @@
                 </div>
                 <button id="review-photo-details" type="button" aria-pressed="false" aria-label="Include AI clarity in this saved treatment" title="Off keeps the same lighting/color treatment and your original clarity. No new AI call." hidden>Clarity</button>
                 <button id="review-photo-texture" type="button" aria-pressed="false" aria-label="Include AI texture in this saved treatment" hidden>Texture</button>
+                <button id="review-photo-grade" type="button" aria-pressed="false" aria-label="Include AI color grading in this saved treatment" hidden>Grade</button>
+                <button id="review-photo-curves" type="button" aria-pressed="false" aria-label="Include AI curves in this saved treatment" hidden>Curves</button>
                 <span id="review-photo-state" class="review-photo-state" role="status"></span>
                     </div>
                 </details>
@@ -175,9 +177,9 @@
             <button class="mobile-tab" data-panel="presets">Presets</button>
             <button class="mobile-tab" data-panel="crop">Crop</button>
             <button class="mobile-tab active" data-panel="basic">Basic</button>
-            <button class="mobile-tab" data-panel="curve">Curve</button>
+            <button class="mobile-tab" data-panel="curve">Curves</button>
             <button class="mobile-tab" data-panel="hsl">HSL</button>
-            <button class="mobile-tab" data-panel="color">Color</button>
+            <button class="mobile-tab" data-panel="color">Color grading</button>
             <button class="mobile-tab" data-panel="detail">Detail</button>
             <button class="mobile-tab" data-panel="effects">Effects</button>
             <button class="mobile-tab" data-panel="masks">Masks</button>
@@ -195,9 +197,9 @@
                 <button class="vtab vtab-review" data-panel="review" title="Photo Review" aria-label="Photo Review">AI</button>
                 <button class="vtab" data-panel="crop" title="Crop">✂</button>
                 <button class="vtab active" data-panel="basic" title="Basic">☀</button>
-                <button class="vtab" data-panel="curve" title="Curve">〰</button>
+                <button class="vtab" data-panel="curve" title="Curves" aria-label="Curves">〰</button>
                 <button class="vtab" data-panel="hsl" title="HSL">🎨</button>
-                <button class="vtab" data-panel="color" title="Color">◐</button>
+                <button class="vtab" data-panel="color" title="Color grading" aria-label="Color grading">◐</button>
                 <button class="vtab" data-panel="detail" title="Detail">▲</button>
                 <button class="vtab" data-panel="effects" title="Effects">✦</button>
                 <button class="vtab" data-panel="masks" title="Masks">◑</button>
@@ -275,6 +277,9 @@
                 <label class="review-consent"><input id="review-allow-details" type="checkbox" checked aria-describedby="review-detail-note">Allow detail adjustments (clarity only)</label>
                 <p id="review-detail-note" class="review-note">Clarity is on by default for all providers, including manual export. Allows—not forces—small clarity changes when justified by the reduced preview. Intentional softness stays protected. Sharpening and noise reduction stay manual.</p>
                 <label class="review-consent"><input id="review-allow-texture" type="checkbox" aria-describedby="review-texture-note">Allow texture adjustments</label>
+                <label class="review-consent"><input id="review-allow-grade" type="checkbox" aria-describedby="review-tonal-note">Allow AI color grading</label>
+                <label class="review-consent"><input id="review-allow-curves" type="checkbox" aria-describedby="review-tonal-note">Allow AI curves</label>
+                <p id="review-tonal-note" class="review-note">Both off by default; enable before a new review. Optional whole-image shadow/midtone/highlight hues and RGB master curves, independently authored for Refine, Balanced and Expressive. After Apply, ⋯ beside the photo offers Grade and Curves switches: off restores that component’s manual baseline, not the original photo. No extra AI call. Manual Color grading and the existing RGB/R/G/B Curves section are always available.</p>
                 <p id="review-texture-note" class="review-note">Off by default. Allows small fine/mid-scale surface contrast changes, independently of clarity. A reduced preview cannot reliably assess fine grain or recover missing detail; uncertain suggestions should be omitted. After Apply, open ⋯ beside the intensity buttons for separate Clarity and Texture comparisons. Off restores your original manual detail settings and keeps the same lighting/color treatment. No extra AI call. Permission is not upload consent.</p>
                 <div id="review-gemini-options">
                     <label class="review-field-label" for="review-gemini-mode">One-click action</label>
@@ -517,27 +522,28 @@
 
 <!-- Scripts -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="js/shaders.js?v=single-canvas-1"></script>
+<script src="js/tonal-tools.js?v=tonal-1"></script>
+<script src="js/shaders.js?v=tonal-1"></script>
 <script src="js/night-tools.js?v=night-1"></script>
 <script src="js/manual-controls.js?v=manual-1"></script>
-<script src="js/gl-engine.js?v=manual-1"></script>
+<script src="js/gl-engine.js?v=tonal-1"></script>
 <script src="js/histogram.js"></script>
-<script src="js/curve-editor.js"></script>
+<script src="js/curve-editor.js?v=tonal-1"></script>
 <script src="js/polygon-geometry.js?v=polygon-1"></script>
 <script src="js/mask-engine.js?v=polygon-1"></script>
 <script src="js/polygon-tool.js?v=polygon-1"></script>
 <script src="js/segmentation.js?v=semantic-1"></script>
 <script src="js/auto-edit.js"></script>
 <script src="js/presets.js"></script>
-<script src="js/review-contract.js?v=intensities-1"></script>
-<script src="js/review-prompt.js?v=intensities-1"></script>
+<script src="js/review-contract.js?v=tonal-1"></script>
+<script src="js/review-prompt.js?v=tonal-1"></script>
 <script src="js/review-json.js"></script>
 <script src="js/review-manual.js?v=intensities-1"></script>
-<script src="js/review.js?v=single-canvas-1"></script>
+<script src="js/review.js?v=tonal-1"></script>
 <script src="js/raw-policy.js?v=cr3-1"></script>
 <script src="js/image-import.js?v=cr3-1"></script>
 <script src="js/photo-viewport.js?v=polygon-1"></script>
-<script src="js/app.js?v=polygon-1"></script>
+<script src="js/app.js?v=tonal-1"></script>
 
 <script>
     document.getElementById('export-quality').addEventListener('input', function() {

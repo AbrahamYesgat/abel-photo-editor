@@ -18,6 +18,8 @@ class CurveEditor {
         this.activeChannel = 'rgb';
         this.draggingPoint = null;
         this.onChange = null;
+        this.onBeforeChange = null;
+        this.onCommit = null;
 
         this._buildTabs();
         this._bindEvents();
@@ -64,6 +66,7 @@ class CurveEditor {
 
         const onStart = (e) => {
             e.preventDefault();
+            this.onBeforeChange?.();
             const touch = e.touches ? e.touches[0] : e;
             const pos = toCanvas(touch.clientX, touch.clientY);
             const idx = getPoint(pos);
@@ -103,6 +106,7 @@ class CurveEditor {
         };
 
         const onEnd = () => {
+            if (this.draggingPoint !== null) this.onCommit?.();
             this.draggingPoint = null;
         };
 
@@ -111,9 +115,11 @@ class CurveEditor {
             const pos = toCanvas(e.clientX, e.clientY);
             const idx = getPoint(pos);
             if (idx > 0 && idx < this.channels[this.activeChannel].length - 1) {
+                this.onBeforeChange?.();
                 this.channels[this.activeChannel].splice(idx, 1);
                 this.draw();
                 this._emitChange();
+                this.onCommit?.();
             }
         });
 
@@ -131,55 +137,15 @@ class CurveEditor {
 
     // Catmull-Rom spline interpolation
     _interpolate(points) {
-        const lut = new Uint8Array(256);
-        if (points.length < 2) {
-            for (let i = 0; i < 256; i++) lut[i] = i;
-            return lut;
-        }
-
-        for (let i = 0; i < 256; i++) {
-            if (i <= points[0].x) {
-                lut[i] = Math.max(0, Math.min(255, points[0].y));
-                continue;
-            }
-            if (i >= points[points.length - 1].x) {
-                lut[i] = Math.max(0, Math.min(255, points[points.length - 1].y));
-                continue;
-            }
-
-            // Find segment
-            let seg = 0;
-            for (let j = 0; j < points.length - 1; j++) {
-                if (i >= points[j].x && i <= points[j + 1].x) { seg = j; break; }
-            }
-
-            const p0 = points[Math.max(0, seg - 1)];
-            const p1 = points[seg];
-            const p2 = points[Math.min(points.length - 1, seg + 1)];
-            const p3 = points[Math.min(points.length - 1, seg + 2)];
-
-            const t = (i - p1.x) / (p2.x - p1.x);
-            const t2 = t * t;
-            const t3 = t2 * t;
-
-            // Catmull-Rom
-            const v = 0.5 * (
-                (2 * p1.y) +
-                (-p0.y + p2.y) * t +
-                (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-                (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
-            );
-            lut[i] = Math.max(0, Math.min(255, Math.round(v)));
-        }
-        return lut;
+        return TonalTools.interpolate(points);
     }
 
     // Generate 4-row LUT texture data (RGB master, R, G, B)
-    getLUT() {
-        const rgb = this._interpolate(this.channels.rgb);
-        const r = this._interpolate(this.channels.r);
-        const g = this._interpolate(this.channels.g);
-        const b = this._interpolate(this.channels.b);
+    getLUT(channels = this.channels) {
+        const rgb = this._interpolate(channels.rgb);
+        const r = this._interpolate(channels.r);
+        const g = this._interpolate(channels.g);
+        const b = this._interpolate(channels.b);
 
         // 256 x 4 texture (RGBA format)
         const data = new Uint8Array(256 * 4 * 4);
@@ -206,12 +172,12 @@ class CurveEditor {
             data[(3 * 256 + i) * 4 + 3] = 255;
         }
 
-        return { data, width: 256, height: 4, isIdentity: this._isIdentity() };
+        return { data, width: 256, height: 4, isIdentity: this._isIdentity(channels) };
     }
 
-    _isIdentity() {
+    _isIdentity(channels = this.channels) {
         for (const ch of ['rgb', 'r', 'g', 'b']) {
-            const pts = this.channels[ch];
+            const pts = channels[ch];
             if (pts.length !== 2) return false;
             if (pts[0].x !== 0 || pts[0].y !== 0 || pts[1].x !== 255 || pts[1].y !== 255) return false;
         }

@@ -177,7 +177,9 @@ const hash = value => createHash('sha256').update(value).digest('hex');
             });
             await load();
             assert.equal(await page.isChecked('#review-allow-details'), false, 'new photo preserves explicit clarity opt-out');
-            assert.deepEqual(await page.evaluate(() => app.review.detailRequest()), { allowDetails: false, allowTexture: false });
+            assert.deepEqual(await page.evaluate(() => app.review.detailRequest()), {
+                allowDetails: false, allowTexture: false, allowColorGrading: false, allowCurves: false
+            });
             assert.equal(await details.isVisible(), false);
             assert.deepEqual(errors, []);
             console.log(`${mobile ? 'Mobile 320px' : 'Desktop'}: detail pixel effect, cached comparison, masks, export, undo/redo, bounds and reset passed.`);

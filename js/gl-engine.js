@@ -93,6 +93,7 @@ class GLEngine {
             'u_cgShadowsCol', 'u_cgShadowsBlend',
             'u_cgMidtonesCol', 'u_cgMidtonesBlend',
             'u_cgHighlightsCol', 'u_cgHighlightsBlend',
+            'u_cgTonal', 'u_cgBlending', 'u_cgBalance',
             'u_sharpenAmount',
             'u_vignetteAmount', 'u_vignetteMidpoint', 'u_vignetteFeather',
             'u_grainAmount',
@@ -317,15 +318,26 @@ class GLEngine {
 
         // Color grading
         const cg = adj.colorGrading || {};
-        const cgS = cg.shadows || { r: 1, g: 1, b: 1, blend: 0 };
-        const cgM = cg.midtones || { r: 1, g: 1, b: 1, blend: 0 };
-        const cgH = cg.highlights || { r: 1, g: 1, b: 1, blend: 0 };
+        const legacy = typeof cg.enabled !== 'boolean';
+        const cgS = legacy && cg.shadows || { r: 1, g: 1, b: 1, blend: 0 };
+        const cgM = legacy && cg.midtones || { r: 1, g: 1, b: 1, blend: 0 };
+        const cgH = legacy && cg.highlights || { r: 1, g: 1, b: 1, blend: 0 };
         gl.uniform3f(u.u_cgShadowsCol, cgS.r, cgS.g, cgS.b);
         gl.uniform1f(u.u_cgShadowsBlend, cgS.blend);
         gl.uniform3f(u.u_cgMidtonesCol, cgM.r, cgM.g, cgM.b);
         gl.uniform1f(u.u_cgMidtonesBlend, cgM.blend);
         gl.uniform3f(u.u_cgHighlightsCol, cgH.r, cgH.g, cgH.b);
         gl.uniform1f(u.u_cgHighlightsBlend, cgH.blend);
+        const tonal = typeof cg.enabled === 'boolean';
+        gl.uniform1i(u.u_cgTonal, tonal ? 1 : 0);
+        gl.uniform1f(u.u_cgBlending, (cg.blending ?? 50) / 100);
+        gl.uniform1f(u.u_cgBalance, (cg.balance || 0) / 100);
+        if (tonal) {
+            for (const [band, uniform] of [['shadows', 'u_cgShadowsCol'],
+                ['midtones', 'u_cgMidtonesCol'], ['highlights', 'u_cgHighlightsCol']]) {
+                gl.uniform3f(u[uniform], ...(cg.enabled ? TonalTools.tint(cg[band]) : [0, 0, 0]));
+            }
+        }
 
         gl.uniform1i(u.u_showOriginal, adj.showOriginal ? 1 : 0);
     }

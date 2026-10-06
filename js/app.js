@@ -34,11 +34,7 @@ class App {
             hslHue: [0, 0, 0, 0, 0, 0, 0, 0],
             hslSat: [0, 0, 0, 0, 0, 0, 0, 0],
             hslLum: [0, 0, 0, 0, 0, 0, 0, 0],
-            colorGrading: {
-                shadows: { r: 1, g: 1, b: 1, blend: 0 },
-                midtones: { r: 1, g: 1, b: 1, blend: 0 },
-                highlights: { r: 1, g: 1, b: 1, blend: 0 },
-            },
+            colorGrading: TonalTools.defaults(),
         };
     }
 
@@ -60,6 +56,12 @@ class App {
         // Curve editor
         const curveContainer = document.getElementById('curve-container');
         this.curveEditor = new CurveEditor(curveContainer);
+        this.curveEditor.onBeforeChange = () => {
+            this._stopComparison();
+            this._pushHistory();
+            this.review?.invalidate('Curves changed. Request a fresh review when finished.');
+        };
+        this.curveEditor.onCommit = () => this._pushHistory();
         this.curveEditor.onChange = (lut) => {
             this.glEngine.updateCurveLUT(lut);
             this._render();
@@ -248,7 +250,15 @@ class App {
             if (this._nightGesture !== key) this._pushHistory();
             this._nightGesture = key;
         }
-        if (category === 'hslHue' || category === 'hslSat' || category === 'hslLum') {
+        if (category === 'grading') {
+            this._stopComparison();
+            if (this._nightGesture !== key) this._pushHistory();
+            this._nightGesture = key;
+            if (this.state.colorGrading?.enabled === undefined) this.state.colorGrading = TonalTools.defaults();
+            const [, band, component] = key.split('_');
+            if (component) this.state.colorGrading[band][component] = value;
+            else this.state.colorGrading[band] = value;
+        } else if (category === 'hslHue' || category === 'hslSat' || category === 'hslLum') {
             const idx = parseInt(key.split('_')[1]);
             this.state[category][idx] = value;
         } else if (category === 'mask') {
@@ -332,67 +342,63 @@ class App {
 
     _buildColorPanel() {
         const panel = document.getElementById('panel-color');
-        const zones = ['shadows', 'midtones', 'highlights'];
-
-        zones.forEach(zone => {
+        const heading = document.createElement('h3');
+        heading.textContent = 'Color grading';
+        const label = document.createElement('label');
+        label.className = 'review-consent';
+        const enabled = document.createElement('input');
+        enabled.type = 'checkbox';
+        enabled.id = 'color-grading-enabled';
+        enabled.checked = true;
+        label.append(enabled, 'Enable manual color grading');
+        const note = document.createElement('p');
+        note.className = 'review-note';
+        note.textContent = 'Tint shadows, midtones and highlights independently. Saturation 0 is neutral. Blending softens transitions; Balance shifts their crossover. Separate from Refine / Balanced / Expressive. Curves has its own editing section.';
+        panel.append(heading, label, note);
+        const legacy = document.createElement('p');
+        legacy.id = 'color-grading-legacy';
+        legacy.className = 'review-note';
+        legacy.hidden = true;
+        legacy.textContent = 'Legacy picker-based grading is preserved. Changing these controls starts a new neutral-format grade; Undo restores the old one. Keep AI grading off to retain the legacy effect.';
+        panel.append(legacy);
+        enabled.addEventListener('change', () => {
+            this._stopComparison();
+            this._pushHistory();
+            if (this.state.colorGrading?.enabled === undefined) this.state.colorGrading = TonalTools.defaults();
+            this.state.colorGrading.enabled = enabled.checked;
+            this._syncGradingControls();
+            this._render();
+            this._pushHistory();
+        });
+        TonalTools.bands.forEach(zone => {
             const section = document.createElement('div');
             section.className = 'color-grade-section';
-
             const title = document.createElement('h4');
             title.textContent = zone.charAt(0).toUpperCase() + zone.slice(1);
             section.appendChild(title);
-
-            const colorRow = document.createElement('div');
-            colorRow.className = 'color-grade-row';
-
-            const colorInput = document.createElement('input');
-            colorInput.type = 'color';
-            colorInput.value = '#808080';
-            colorInput.className = 'color-grade-picker';
-
-            const blendSlider = document.createElement('input');
-            blendSlider.type = 'range';
-            blendSlider.min = 0;
-            blendSlider.max = 100;
-            blendSlider.value = 0;
-            blendSlider.className = 'slider-input color-blend-slider';
-
-            const blendVal = document.createElement('span');
-            blendVal.className = 'slider-value';
-            blendVal.textContent = '0';
-
-            const updateColorGrade = () => {
-                const hex = colorInput.value;
-                const r = parseInt(hex.slice(1, 3), 16) / 128;
-                const g = parseInt(hex.slice(3, 5), 16) / 128;
-                const b = parseInt(hex.slice(5, 7), 16) / 128;
-                const blend = parseFloat(blendSlider.value) / 100;
-                blendVal.textContent = blendSlider.value;
-                this.state.colorGrading[zone] = { r, g, b, blend };
-                this._render();
-            };
-
-            colorInput.addEventListener('input', updateColorGrade);
-            blendSlider.addEventListener('input', updateColorGrade);
-
-            const blendLabel = document.createElement('span');
-            blendLabel.className = 'slider-label';
-            blendLabel.textContent = 'Blend';
-
-            colorRow.appendChild(colorInput);
-            const blendRow = document.createElement('div');
-            blendRow.className = 'slider-row';
-            const blendHeader = document.createElement('div');
-            blendHeader.className = 'slider-header';
-            blendHeader.appendChild(blendLabel);
-            blendHeader.appendChild(blendVal);
-            blendRow.appendChild(blendHeader);
-            blendRow.appendChild(blendSlider);
-
-            section.appendChild(colorRow);
-            section.appendChild(blendRow);
+            this._createSlider(section, `${title.textContent} hue (°)`, `grade_${zone}_hue`, 0, 360, 1, 0, 'grading');
+            this.sliders[`grade_${zone}_hue`].input.style.background =
+                'linear-gradient(to right,#e45b5b,#e6cf62,#65ba6b,#65baba,#687ce0,#c26bdd,#e45b5b)';
+            this._createSlider(section, `${title.textContent} saturation`, `grade_${zone}_saturation`, 0, 100, 1, 0, 'grading');
             panel.appendChild(section);
         });
+        this._createSlider(panel, 'Blending', 'grade_blending', 0, 100, 1, 50, 'grading');
+        this._createSlider(panel, 'Balance', 'grade_balance', -100, 100, 1, 0, 'grading');
+    }
+
+    _syncGradingControls() {
+        const grade = this.state.colorGrading?.enabled === undefined ? TonalTools.defaults() : this.state.colorGrading;
+        const enabled = document.getElementById('color-grading-enabled');
+        if (enabled) enabled.checked = grade.enabled;
+        const legacy = document.getElementById('color-grading-legacy');
+        if (legacy) legacy.hidden = this.state.colorGrading?.enabled !== undefined;
+        for (const [key, slider] of Object.entries(this.sliders)) {
+            if (!key.startsWith('grade_')) continue;
+            const [, band, component] = key.split('_');
+            slider.input.value = component ? grade[band][component] : grade[band];
+            slider.val.value = this._formatVal(Number(slider.input.value), 1);
+            slider.input.disabled = slider.val.disabled = !grade.enabled;
+        }
     }
 
     _buildDetailPanel() {
@@ -1278,6 +1284,7 @@ class App {
         if (!this.image) return;
         this._comparisonState = preferReview && this.review?.canCompare() ? this.review.beforeState : null;
         this._comparisonMasks = this._comparisonState ? this.review.beforeMasks : null;
+        this._comparisonCurves = this._comparisonState ? this.review.beforeCurves : null;
         this.showingOriginal = !this._comparisonState;
         const label = document.getElementById('compare-label');
         label.textContent = this._comparisonState ? 'Before review' : 'Original photo';
@@ -1293,6 +1300,7 @@ class App {
         this.showingOriginal = false;
         this._comparisonState = null;
         this._comparisonMasks = null;
+        this._comparisonCurves = null;
         document.getElementById('compare-label').hidden = true;
         if (wasActive) {
             this._render();
@@ -1562,7 +1570,7 @@ class App {
             Math.max(1, Math.round(engine.previewHeight * scale)));
         this.review?.onRender();
         const adj = { ...(this._comparisonState || this.state), showOriginal: this.showingOriginal };
-        this.glEngine.updateCurveLUT(this.curveEditor.getLUT());
+        this.glEngine.updateCurveLUT(this.curveEditor.getLUT(this._comparisonCurves || this.curveEditor.channels));
         const masksWithAdj = (this._comparisonMasks || this.maskEngine.masks).filter(m =>
             m.visible && Object.values(m.adjustments).some(v => v !== 0)
         );
@@ -1643,11 +1651,13 @@ class App {
         if (this._detection && this._detection.signature !== this._detectionSignature())
             this._cancelDetection('Edit changed. Detection cancelled; detect again when ready.');
         const signature = JSON.stringify({
-            size: [this.imageWidth, this.imageHeight], state: this.state, masks: this.maskEngine.describeMasks()
+            size: [this.imageWidth, this.imageHeight], state: this.state, curves: this.curveEditor?.channels, masks: this.maskEngine.describeMasks()
         });
         // Don't push if same as current
         if (!force && this.historyIndex >= 0 && this.history[this.historyIndex].signature === signature) return;
-        const snap = { signature, state: JSON.stringify(this.state), masks: this.maskEngine.captureMasks() };
+        const snap = { signature, state: JSON.stringify(this.state),
+            curves: this.curveEditor ? JSON.parse(JSON.stringify(this.curveEditor.channels)) : null,
+            masks: this.maskEngine.captureMasks() };
 
         this.history = this.history.slice(0, this.historyIndex + 1);
         this.history.push(snap);
@@ -1670,6 +1680,10 @@ class App {
     _restoreHistory() {
         const snapshot = this.history[this.historyIndex];
         this.state = JSON.parse(snapshot.state);
+        if (snapshot.curves && this.curveEditor) {
+            this.curveEditor.channels = JSON.parse(JSON.stringify(snapshot.curves));
+            this.curveEditor.draw();
+        }
         this.maskEngine.restoreMasks(snapshot.masks);
         this._exitMaskMode();
         this._updateMaskList();
@@ -1730,6 +1744,7 @@ class App {
 
     _syncSlidersFromState() {
         this._syncTextureControls();
+        this._syncGradingControls();
         for (const [key, slider] of Object.entries(this.sliders)) {
             if (key.startsWith('hslHue_') || key.startsWith('hslSat_') || key.startsWith('hslLum_')) {
                 const parts = key.split('_');
@@ -3271,6 +3286,7 @@ class Library {
             rawHalfSize: this.app._rawInfo?.halfSize,
             sourceCrops: this.app._sourceCrops || [],
             state: JSON.parse(JSON.stringify(this.app.state)),
+            curves: JSON.parse(JSON.stringify(this.app.curveEditor.channels)),
             masks: this.app.maskEngine.masks.map(m => ({
                 type: m.type,
                 inverted: m.inverted,
@@ -3285,10 +3301,11 @@ class Library {
 
         const defaultState = this.app._defaultState();
         const isEdited = JSON.stringify(editData.state) !== JSON.stringify(defaultState) ||
-            editData.masks.length > 0 || editData.sourceCrops.length > 0;
+            editData.masks.length > 0 || editData.sourceCrops.length > 0 || !this.app.curveEditor._isIdentity();
+        const hadEdits = photo.hasEdits;
         photo.hasEdits = isEdited;
 
-        if (isEdited) {
+        if (isEdited || hadEdits) {
             // If we have FS access and this photo came from a folder, write sidecar file
             if (this.dirHandle && photo.fileHandle) {
                 try {
@@ -3376,6 +3393,10 @@ class Library {
                 }
             }
             this.app.state = { ...this.app._defaultState(), ...editData.state };
+            if (editData.curves) {
+                this.app.curveEditor.channels = ReviewContract.validateCurves(editData.curves);
+                this.app.curveEditor.draw();
+            }
             this.app._syncSlidersFromState();
 
             // Restore masks
