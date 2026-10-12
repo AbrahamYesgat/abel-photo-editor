@@ -2,6 +2,46 @@
 
 A vanilla JavaScript, WebGL photo editor. Editing runs in the browser. Optional photo critique uses **Azure OpenAI**, **Gemini cloud**, **local Qwen vision through Ollama**, or **ChatGPT — Manual import**. All use a **resized JPEG of the current rendered edit**, current lighting/color slider values, and your intent (plus clarity, texture, color-grading and curve baselines only with their respective permissions). Azure forwards these to your Microsoft Azure OpenAI deployment; Gemini forwards them to Google; local mode sends them only to the loopback companion and its local Ollama runtime. Manual mode only prepares downloads: you upload to ChatGPT yourself. There is no automatic provider fallback.
 
+## Non-destructive cropping
+
+Crop hides pixels; it never replaces the decoded original. Reopen **Crop** to
+see the full, currently adjusted source and the existing editable frame. Expand
+the handles to recover edges, or choose **Reset crop → Apply** for the full frame
+and zero straightening. Cancel leaves the current edit/history untouched.
+Repeated crops, straightening, mask changes, curves and color edits support
+ordinary multi-step **Undo and Redo**. Reset crop preserves all tonal edits and
+masks; the main Reset button still resets everything.
+
+All masks retain their full-source coverage and editable polygon vertices.
+Painting/selection in a cropped view maps to source coordinates; new local
+detection and AI regions are mapped from the visible frame. Comparing original
+lighting/color keeps the same crop. Reviews are invalidated by framing changes.
+Exports render only the selected native-pixel frame, using bounded source tiles
+and neighboring original pixels for detail/noise processing—not a resized or
+repeatedly encoded crop. Crop handles require no full-resolution pixel copies.
+
+Library auto-saves crop metadata, adjustments and bounded undo/redo history to
+IndexedDB (and folder `.ABEL.json` sidecars when permission allows). Imported
+original files are stored once locally so the Library can reopen them after
+reload; they are never uploaded or overwritten. Saved thumbnails show the edit.
+Batch retains saved Library edits/crops for matching originals; new files still
+use batch auto-edit. Browser storage is not a backup: clearing site data removes
+locally stored originals/edits, and quota/permission failures are shown in status.
+Keep your original files and sidecars.
+
+Legacy crop chains can be reconstructed from their still-available original.
+Already-exported cropped files contain no missing borders to recover. Previously
+discarded mask coverage or baked polygon corners cannot be reconstructed.
+CR3 crops retain the decoded 8-bit sRGB source (full or explicit Smaller RAW
+resolution), not additional sensor precision or pixels beyond that development.
+
+Validation: `node --test test/crop-geometry.test.js` and
+`PLAYWRIGHT_MODULE=/path/to/playwright node scripts/check-crop.cjs`.
+The browser check uses synthetic pixels on desktop/mobile Chromium, actual
+IndexedDB/reload, native sync/async exports, interleaved crop history and polygon
+geometry. `BASE_URL` verifies deployed assets without model calls. Mobile
+emulation is not physical iPhone/Safari certification.
+
 ## Manual controls: whole photo and masks
 
 Masks now expose **Whites, Blacks, Vibrance, Dehaze and Sharpening**, alongside
@@ -87,11 +127,10 @@ Library edit storage and native-resolution export use the existing pipelines.
 Done Masking or another panel hides the editing outline; Toggle Overlay
 controls the optional red selection tint.
 
-**Crop limitation:** cropping/rotating preserves polygon coverage, feather,
-inversion and adjustments as a **“Polygon (cropped)” brush mask**. Corners
-are then baked, not movable; Brush / Erase can refine it. This avoids joining
-disconnected pieces of a clipped concave shape. Undo crop restores the
-original editable polygon; crop redo remains unsupported, as before.
+**Non-destructive crop:** polygons keep their original source-coordinate
+corners, feather, inversion and adjustments. Cropping/straightening projects
+the selection into the visible frame without baking or clipping its geometry.
+Reopen Crop and expand the frame to recover hidden parts of the polygon.
 Polygon masks use the existing **2048-pixel maximum mask raster dimension**,
 with normalized geometry independent of photo/preview size. No new AI
 capability, inference, photo upload or dependency is involved.
@@ -131,7 +170,8 @@ cancel/error/uncertain output never creates a guessed full-frame mask.
   Erase**, feather/flow/size and **Mask strength**. **Invert Mask** selects the
   complementary background. Other masks and global adjustments are retained.
   Creation is one undo step; mask pixels/metadata survive Undo/Redo and Library
-  edit storage. Detected brush masks also transform with an applied crop.
+  edit storage. Detected brush masks stay in source coordinates when cropping;
+  detection of a cropped view maps its new coverage back into that source.
 - Select a non-inverted **Sky** mask for **Natural definition**, **Recover bright
   sky**, **Warm sunset**, **Cool blue hour**, or **Soft atmosphere**. These are
   local lighting/color looks—not sky replacement or generated scenery. A preset
@@ -202,7 +242,7 @@ Two separate tools sit beside **Auto** (on small screens the editing buttons occ
 
 Both run **inside the browser**, with no model download, photo upload, paid request or automatic application on import. They operate on the editor's developed **8-bit sRGB**, not linear sensor data; deconvolution is therefore an approximation to optical motion. The current AI review allowlists are unchanged—models cannot set these controls. A review you explicitly request still sees the current corrected edit.
 
-**100% detail preview** in Detail shows native-pixel samples of the selected image position, with *only* these two corrections, so a downscaled fit preview cannot hide their effect. Use its position sliders and hold **Compare original**. The main canvas still shows the complete edit. Undo/redo, source comparison, saved library edits, crop and native-resolution PNG/JPEG/WebP export retain the settings. A crop rotation rotates the streak direction; distance remains in the developed image's pixels (including explicit Smaller RAW imports), not screen pixels.
+**100% detail preview** in Detail shows native-pixel samples of the selected image position, with *only* these two corrections, so a downscaled fit preview cannot hide their effect. Use its position sliders and hold **Compare original**. The main canvas still shows the complete edit. Undo/redo, source comparison, saved library edits, crop and native-resolution PNG/JPEG/WebP export retain the settings. Streak direction and distance stay in original developed-source pixels (including explicit Smaller RAW imports); crop rotation rotates the view, not the underlying correction.
 
 Implementation: a 5×5 bilateral filter separates luminance and chroma strengths, followed—only if enabled—by a pixel-integrated line-PSF inverse with regularization 0.08, a windowed ±24-sample support and normalized DC response. Restoration is cached once per source/settings change and shared by mask layers, before existing color/detail adjustments. Native export includes the complete inverse/filter halo; it does not export the reduced preview. Normal Download uses a separate renderer and frozen edit snapshot, yields between 512px tiles, displays progress and offers **Cancel export**, without replacing the visible photo with partial tiles. Encoding may still take time after rendering; cancellation discards its result. No iterative CPU deconvolution or whole-photo readback runs during slider gestures. Export still has the existing final-canvas memory limits. These are bounded local tools, not guaranteed recovery; physical iOS/Safari performance is not certified.
 
@@ -464,7 +504,7 @@ The model sees only the existing reduced JPEG (cloud/manual up to 1280 pixels, l
 
 In **Masks**, select the named region, lower **Mask strength** independently (0–100%), or open **Refine radial position & feather** to adjust center, horizontal/vertical radii and feather numerically as image percentages. Enter/blur commits geometry; use **Toggle Overlay** to inspect coverage without the red overlay obscuring brightness. Existing exposure/highlights/shadows/clarity sliders remain available. Larger feather softens the edge but does not reduce the center's full strength. Manual refinement invalidates cached AI alternatives so switching intensity cannot overwrite it; undo/redo restores mask pixels, geometry and strength, not the discarded review. These controls make no model calls. Strength changes reuse GPU layers without full-frame CPU readback or mask pixel copies; geometry uses the existing bounded 2048-pixel mask canvas. Sidecars/IndexedDB and native-resolution exports retain strength and geometry; legacy masks default to 100%. `scripts/check-mask-refinement.cjs` checks independent pixel falloff, refinement, undo/redo, persistence, export and desktop/mobile controls with synthetic images.
 
-Strength can be chosen before applying and changed afterward beside the photo: 0% changes nothing and creates no new masks; 50% interpolates global targets from the frozen review baseline and halves regional offsets; 100% uses the full selected recipe. It does not shrink or harden masks. Changing intensity, Global/Adaptive or strength replaces the previous AI transaction without requesting a review. Hold the photo or **Hold to see before review** to compare against the complete pre-review composite (including old masks); release to return. Comparison also works after redo unless another edit invalidates it. PNG/JPEG/WebP and scaled export include the mask composite and never export the held comparison. Library sidecars/IndexedDB retain region names, reasons, blending and bitmap masks. Cropping still clears masks because dimensions change; undoing the crop restores its prior masks. Crop redo remains unsupported.
+Strength can be chosen before applying and changed afterward beside the photo: 0% changes nothing and creates no new masks; 50% interpolates global targets from the frozen review baseline and halves regional offsets; 100% uses the full selected recipe. It does not shrink or harden masks. Changing intensity, Global/Adaptive or strength replaces the previous AI transaction without requesting a review. Hold the photo or **Hold to see before review** to compare against the complete pre-review composite (including old masks); release to return. Comparison also works after redo unless another edit invalidates it. PNG/JPEG/WebP and scaled export include the mask composite and never export the held comparison. Library sidecars/IndexedDB retain region names, reasons, blending and bitmap masks. Cropping preserves every mask in original source coordinates; crop Undo/Redo changes framing without baking or discarding selections.
 
 Touch and hold the photo for 350 ms to see **Before review** immediately after applying; release to return to the edit, including when releasing outside the control. At other times, holding shows the original lighting/color of the current source (not uncropped framing). The desktop Compare button and backslash key also show original lighting/color. Movement, scrolling, cancellation, switching tools, or leaving the window ends comparison. Crop and mask gestures take priority. On mobile, the review drawer leaves the photo visible above it; swipe only its top handle to dismiss, not the scrollable feedback. Adjustment strength and Apply scroll naturally with the review content; they never float over the feedback.
 

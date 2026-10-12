@@ -176,8 +176,9 @@ class PolygonTool {
     point(e) {
         const r = document.getElementById('main-canvas').getBoundingClientRect();
         const snap = (value, size) => value < 8 ? 0 : value > size - 8 ? 1 : value / size;
-        return { x: Math.max(0, Math.min(1, snap(e.clientX - r.left, r.width))),
-            y: Math.max(0, Math.min(1, snap(e.clientY - r.top, r.height))) };
+        const source = CropGeometry.point(this.app._geometry(), { x: Math.max(0, Math.min(1, snap(e.clientX - r.left, r.width))),
+            y: Math.max(0, Math.min(1, snap(e.clientY - r.top, r.height))) });
+        return { x: Math.max(0, Math.min(1, source.x)), y: Math.max(0, Math.min(1, source.y)) };
     }
 
     hitsImage(e) {
@@ -190,6 +191,8 @@ class PolygonTool {
         const r = document.getElementById('main-canvas').getBoundingClientRect();
         let best = -1, distance = radius;
         points.forEach((p, i) => {
+            p = CropGeometry.point(CropGeometry.inverse(this.app._geometry()), p);
+            if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
             const d = Math.hypot(r.left + p.x * r.width - e.clientX, r.top + p.y * r.height - e.clientY);
             if (d < distance) { best = i; distance = d; }
         });
@@ -259,9 +262,16 @@ class PolygonTool {
             ctx.clearRect(0, 0, container.width, container.height);
             const points = this.drag?.points || this.draft || this.app.maskEngine.getActiveMask()?.params?.points;
             if (!points?.length) return;
-            const screen = p => ({ x: photo.left - container.left + p.x * photo.width,
-                y: photo.top - container.top + p.y * photo.height });
+            const screen = p => {
+                p = CropGeometry.point(CropGeometry.inverse(this.app._geometry()), p);
+                return { x: photo.left - container.left + p.x * photo.width,
+                    y: photo.top - container.top + p.y * photo.height };
+            };
             const vertices = points.map(screen);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(photo.left - container.left, photo.top - container.top, photo.width, photo.height);
+            ctx.clip();
             ctx.beginPath();
             ctx.moveTo(vertices[0].x, vertices[0].y);
             for (const p of vertices.slice(1)) ctx.lineTo(p.x, p.y);
@@ -284,6 +294,7 @@ class PolygonTool {
                 ctx.fillStyle = this.draft && i === 0 ? '#63d9b0' : '#51acff'; ctx.fill();
                 ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
             });
+            ctx.restore();
         });
     }
 }

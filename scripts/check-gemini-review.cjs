@@ -119,8 +119,9 @@ async function run() {
             assert.deepEqual(await pixels(), before);
             assert.equal(await page.evaluate(() => app.maskEngine.masks.length), 0);
 
-            // Cropped previews are a new top-left coordinate frame, with no old-image offset.
+            // AI geometry is relative to the cropped preview, then stored in source coordinates.
             await page.evaluate(() => {
+                app.cropTool.activate();
                 app.cropTool.cropX = 0.25; app.cropTool.cropY = 0.1;
                 app.cropTool.cropW = 0.5; app.cropTool.cropH = 0.7;
                 app.cropTool.apply();
@@ -134,10 +135,12 @@ async function run() {
                 const mask = app.maskEngine.masks[0];
                 return { width: mask.canvas.width, height: mask.canvas.height, ...mask.params };
             });
-            assert.equal(cropped.cx, 300);
-            assert.equal(cropped.cy, 87.5);
-            assert.equal(cropped.rx, 48);
-            assert.equal(cropped.ry, 52.5);
+            assert.equal(cropped.width, 800);
+            assert.equal(cropped.height, 500);
+            assert.ok(Math.abs(cropped.cx - 500) < 1e-9);
+            assert.ok(Math.abs(cropped.cy - 137.5) < 1e-9);
+            assert.ok(Math.abs(cropped.rx - 48) < 1e-9);
+            assert.ok(Math.abs(cropped.ry - 52.5) < 1e-9);
 
             const mapping = await page.evaluate(region => {
                 return [[800, 500], [400, 700], [9000, 3000], [3000, 9000], [321, 197]].map(([imageWidth, imageHeight]) => {

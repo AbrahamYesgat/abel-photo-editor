@@ -77,23 +77,22 @@ test('polygon starts black, uses bounded normalized raster geometry and copies p
     assert.equal(h.engine.masks.length, 0, 'invalid stored geometry cannot become a full-photo mask');
 });
 
-test('crop bakes polygon coverage with adjustment/inversion metadata and repeated crop support', () => {
+test('source-coordinate polygon history shares pixels across crop-only transactions', () => {
     const h = engine(), m = h.engine.createMask('polygon');
     h.engine.setPolygon(m, triangle, 40);
     m.inverted = true; m.opacity = .4; m.adjustments.exposure = -.5;
-    const crop = { x: 1000, y: 1000, width: 2000, height: 2000, rotation: 12,
+    const crop = { version: 1, x: 1000, y: 1000, width: 2000, height: 2000, rotation: 12,
         sourceWidth: 6000, sourceHeight: 4000 };
-    const [baked] = h.engine.cropDetectedMasks(crop);
-    assert.equal(baked.type, 'brush');
-    assert.equal(baked.polygonBaked, true);
-    assert.equal(baked.params, null);
-    assert.equal(baked.inverted, true);
-    assert.equal(baked.opacity, .4);
-    assert.equal(baked.adjustments.exposure, -.5);
-    assert.equal(m.type, 'polygon', 'pre-crop geometry retained');
-    h.engine.masks = [baked];
-    assert.equal(h.engine.cropDetectedMasks(crop).length, 1);
-    assert.match(baked.reason, /Undo crop restores/);
+    const [before] = h.engine.captureMasks();
+    h.engine.app.crop = crop;
+    const [after] = h.engine.captureMasks();
+    assert.equal(after.canvas, before.canvas);
+    assert.deepEqual(after.params, before.params);
+    assert.equal(after.type, 'polygon');
+    assert.equal(after.inverted, true);
+    assert.equal(after.opacity, .4);
+    assert.equal(after.adjustments.exposure, -.5);
+    assert.equal(m.type, 'polygon', 'all source corners remain editable');
 });
 
 test('polygon geometry and controller are served locally and loaded in dependency order', async t => {

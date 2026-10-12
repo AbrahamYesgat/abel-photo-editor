@@ -32,6 +32,7 @@ jobs:
           test -f _site/js/manual-controls.js
           test -f _site/js/tonal-tools.js
           test -f _site/js/polygon-geometry.js
+          test -f _site/js/crop-geometry.js
           test -f _site/js/polygon-tool.js
           test -f _site/js/vendor/libraw/libraw.wasm
           test -f _site/js/vendor/libraw/LICENSE

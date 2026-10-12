@@ -86,7 +86,7 @@ class GLEngine {
         const gl = this.gl;
         const p = this.program;
         const names = [
-            'u_image', 'u_curveLUT', 'u_textureBand', 'u_resolution', 'u_texelSize', 'u_region', 'u_sourceRegion',
+            'u_image', 'u_curveLUT', 'u_textureBand', 'u_resolution', 'u_texelSize', 'u_region', 'u_sourceRegion', 'u_geometry',
             'u_exposure', 'u_contrast', 'u_highlights', 'u_shadows',
             'u_whites', 'u_blacks', 'u_temperature', 'u_tint',
             'u_vibrance', 'u_saturation', 'u_clarity', 'u_texture', 'u_dehaze',
@@ -173,6 +173,18 @@ class GLEngine {
         gl.uniform2f(this.uniforms.u_texelSize, 1 / renderW, 1 / renderH);
         gl.uniform4f(this.uniforms.u_sourceRegion, 0, 0, 1, 1);
         this.setRegion(0, 0, 1, 1);
+        this.setCrop(null);
+    }
+
+    setCrop(crop) {
+        this.crop = CropGeometry.validate(crop, this.imageWidth, this.imageHeight);
+        this.geometry = CropGeometry.matrix(this.crop, this.imageWidth, this.imageHeight);
+        this.gl.useProgram(this.program);
+        this.gl.uniformMatrix3fv(this.uniforms.u_geometry, false, CropGeometry.uniform(this.geometry));
+        const width = crop?.width || this.imageWidth, height = crop?.height || this.imageHeight;
+        const scale = Math.min(1, Math.max(...this._sourceSize) / Math.max(width, height));
+        this.previewWidth = Math.max(1, Math.round(width * scale));
+        this.previewHeight = Math.max(1, Math.round(height * scale));
     }
 
     loadExportTile(img, adjustments = {}) {
@@ -186,9 +198,12 @@ class GLEngine {
         const pad = Math.max(4, Math.ceil(3 * Math.max(1, Math.max(iw, ih) / 1600)) + 1) +
             (night.noiseLuma || night.noiseColor ? 2 : 0) +
             (night.motionAmount ? NightTools.radius : 0);
-        const sx = Math.max(0, Math.floor(x * iw) - pad), sy = Math.max(0, Math.floor(y * ih) - pad);
-        const sw = Math.min(iw, Math.ceil((x + w) * iw) + pad) - sx;
-        const sh = Math.min(ih, Math.ceil((y + h) * ih) + pad) - sy;
+        const corners = [[x,y], [x+w,y], [x,y+h], [x+w,y+h]]
+            .map(([x,y]) => CropGeometry.point(this.geometry, { x, y }));
+        const sx = Math.max(0, Math.min(iw - 1, Math.floor(Math.min(...corners.map(p => p.x)) * iw) - pad));
+        const sy = Math.max(0, Math.min(ih - 1, Math.floor(Math.min(...corners.map(p => p.y)) * ih) - pad));
+        const sw = Math.max(1, Math.min(iw, Math.ceil(Math.max(...corners.map(p => p.x)) * iw) + pad) - sx);
+        const sh = Math.max(1, Math.min(ih, Math.ceil(Math.max(...corners.map(p => p.y)) * ih) + pad) - sy);
         const tile = this._exportSource ||= document.createElement('canvas');
         const scale = Math.min(1, 2048 / Math.max(sw, sh), gl.getParameter(gl.MAX_TEXTURE_SIZE) / Math.max(sw, sh));
         tile.width = Math.max(1, Math.round(sw * scale)); tile.height = Math.max(1, Math.round(sh * scale));
@@ -228,8 +243,9 @@ class GLEngine {
     }
 
     *_exportTiles(img, adjustments, masks, scale, tileSize) {
-        const width = Math.round((img.naturalWidth || img.width) * scale);
-        const height = Math.round((img.naturalHeight || img.height) * scale);
+        const crop = this.crop;
+        const width = Math.round((crop?.width || img.naturalWidth || img.width) * scale);
+        const height = Math.round((crop?.height || img.naturalHeight || img.height) * scale);
         if (width < 1 || height < 1 || width > 32767 || height > 32767 || width * height > 128 * 1024 * 1024) {
             throw new Error('This export is too large. Choose a smaller export scale.');
         }
@@ -239,6 +255,7 @@ class GLEngine {
         let complete = false;
         try {
             this.loadImage(img);
+            this.setCrop(crop);
             const tileWidth = Math.min(tileSize, width), tileHeight = Math.min(tileSize, height);
             const total = Math.ceil(width / tileWidth) * Math.ceil(height / tileHeight);
             let done = 0;
@@ -559,17 +576,22 @@ class GLEngine {
             varying vec2 v_uv;
             uniform sampler2D u_base, u_layer, u_previous, u_mask;
             uniform vec4 u_region;
+            uniform mat3 u_geometry;
             uniform int u_mode;
             uniform bool u_inverted;
             uniform float u_opacity;
             void main() {
                 vec2 uv = vec2(v_uv.x, 1. - v_uv.y);
+                vec2 source = (u_geometry * vec3(u_region.xy + v_uv * u_region.zw, 1.)).xy;
+                if (any(lessThan(source, vec2(0.))) || any(greaterThan(source, vec2(1.)))) {
+                    gl_FragColor = vec4(0.); return;
+                }
                 vec4 previous = texture2D(u_previous, uv);
                 if (previous.a == 0.) previous.rgb = vec3(0.);
                 if (u_mode == 2) { gl_FragColor = previous; return; }
                 vec4 layer = texture2D(u_layer, uv);
                 if (layer.a == 0.) layer.rgb = vec3(0.);
-                float weight = texture2D(u_mask, u_region.xy + v_uv * u_region.zw).r;
+                float weight = texture2D(u_mask, source).r;
                 if (u_inverted) weight = 1. - weight;
                 weight *= u_opacity;
                 if (u_mode == 1) {
@@ -591,7 +613,7 @@ class GLEngine {
         gl.deleteShader(vs); gl.deleteShader(fs);
         if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('Mask compositor failed to initialize.');
         this._mixer = { program };
-        for (const name of ['base', 'layer', 'previous', 'mask', 'mode', 'inverted', 'region', 'opacity']) {
+        for (const name of ['base', 'layer', 'previous', 'mask', 'mode', 'inverted', 'region', 'opacity', 'geometry']) {
             this._mixer[name] = gl.getUniformLocation(program, `u_${name}`);
         }
     }
@@ -614,7 +636,7 @@ class GLEngine {
             ...ManualControls.merge(adj, mask.adjustments, mask.blend === 'additive'), showOriginal: false
         }))];
         // Reuse unchanged adjusted layers during brush strokes and local slider drags.
-        const keys = adjustments.map(value => `${this.region}:${this._curveRevision}:${JSON.stringify(value)}`);
+        const keys = adjustments.map(value => `${this.geometry}:${this.region}:${this._curveRevision}:${JSON.stringify(value)}`);
         const targets = [];
         const retained = new Set();
         const cacheLayers = masks.length <= 6;
@@ -682,6 +704,7 @@ class GLEngine {
                 gl.uniform1i(mixer[name], unit);
             }
             gl.uniform4fv(mixer.region, this.region);
+            gl.uniformMatrix3fv(mixer.geometry, false, CropGeometry.uniform(this.geometry));
             gl.uniform1i(mixer.mode, mask.blend === 'additive' ? 1 : 0);
             gl.uniform1i(mixer.inverted, mask.inverted ? 1 : 0);
             gl.uniform1f(mixer.opacity, mask.opacity ?? 1);

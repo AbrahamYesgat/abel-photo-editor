@@ -37,7 +37,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         createElement(tag) {
             const node = element();
             if (tag === 'canvas') node.getContext = () => ({
-                drawImage() {}, fillRect() {}, clearRect() {}, save() {}, restore() {}, translate() {}, scale() {},
+                drawImage() {}, fillRect() {}, clearRect() {}, save() {}, restore() {}, translate() {}, scale() {}, rotate() {}, transform() {},
                 createRadialGradient() { return { addColorStop() {} }; },
                 createLinearGradient() { return { addColorStop() {} }; }
             });
@@ -55,7 +55,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
             location: { origin: 'http://localhost:3000' }, localStorage: storage,
             listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; },
         },
-        ReviewContract, ReviewManual, TonalTools: require('../js/tonal-tools.js'),
+        ReviewContract, ReviewManual, TonalTools: require('../js/tonal-tools.js'), CropGeometry: require('../js/crop-geometry.js'),
         ReviewJSON: require('../js/review-json.js'), console, setTimeout, clearTimeout, URL, AbortController,
         Blob, atob, navigator: {}, ManualControls: require('../js/manual-controls.js'),
     });
@@ -70,7 +70,7 @@ function harness({ storage = memoryStorage(), initialize = false } = {}) {
         curveEditor: { draw() {}, channels: Object.fromEntries(['rgb', 'r', 'g', 'b'].map(ch =>
             [ch, [{ x: 0, y: 0 }, { x: 255, y: 255 }]])) },
         sliders: {},
-        glEngine: { loadImage() {} },
+        glEngine: { loadImage() {}, setCrop() {} },
         _fitCanvas() {}, _hideCompositeOverlay() {},
     });
     app.maskEngine = new context.MaskEngine(app);
@@ -1152,6 +1152,7 @@ test('normalized adaptive geometry maps to capped mask pixels, not original or p
     const { app, review } = harness();
     app.imageWidth = 8000;
     app.imageHeight = 4000;
+    app.image = { width: 8000, height: 4000 };
     prepare(review, []);
     review.result.adaptive.regions = [adaptiveRegion()];
     review.selection = 'adaptive';
@@ -1188,6 +1189,7 @@ test('cached adaptive geometry and baseline mask pixels are shared until a brush
 test('large brush history is trimmed by unique mask pixels, not just entry count', () => {
     const { app } = harness();
     app.imageWidth = 8000; app.imageHeight = 4000;
+    app.image = { width: 8000, height: 4000 };
     const mask = app.maskEngine.createMask('brush');
     for (let i = 0; i < 16; i++) {
         app.maskEngine.touch(mask);
@@ -1241,26 +1243,31 @@ test('a tampered response cannot set crop, sharpen, or arbitrary state', () => {
     }
 });
 
-test('Undo after review restores color edits before undoing an earlier crop', () => {
+test('Undo and redo after review retain source and restore crop metadata independently', () => {
     const { app, review } = harness();
     app.state.temperature = 12;
     app._pushHistory();
-    const cropped = app.image;
-    const original = { width: 1000, height: 800 };
-    app._preCropImage = original;
-    app._preCropWidth = 1000;
-    app._preCropHeight = 800;
-    app._preCropHistoryIndex = app.historyIndex;
+    const original = app.image;
+    const crop = { version: 1, sourceWidth: 500, sourceHeight: 400,
+        x: 100, y: 80, width: 300, height: 240, rotation: 0 };
+    app._setCrop(crop);
+    app._pushHistory();
     prepare(review, [{ key: 'exposure', value: 0.5, reason: 'Lift midtones.' }]);
     review.apply();
     app._undo();
     assert.equal(app.state.exposure, 0);
     assert.equal(app.state.temperature, 12);
-    assert.equal(app.image, cropped);
+    assert.equal(app.image, original);
+    assert.equal(app.imageWidth, 300);
     app._undo();
     assert.equal(app.image, original);
-    assert.equal(app.imageWidth, 1000);
+    assert.equal(app.imageWidth, 500);
     assert.equal(app.state.temperature, 12);
+    app._redo();
+    assert.equal(app.imageWidth, 300);
+    app._redo();
+    assert.equal(app.state.exposure, .5);
+    assert.equal(app.image, original);
 });
 
 test('comparison selects pre-review state without changing real edits or source', () => {

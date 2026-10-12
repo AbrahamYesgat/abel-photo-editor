@@ -480,10 +480,10 @@ class App {
         const details = document.getElementById('night-inspector');
         if (!details.open || !this.image) return;
         const width = Math.min(280, details.clientWidth || 280, this.imageWidth);
-        const height = Math.min(180, this.imageHeight), pad = 30;
+        const height = Math.min(180, this.imageHeight);
         const x = Math.round((this.imageWidth - width) * Number(document.getElementById('night-inspector-x').value) / 100);
         const y = Math.round((this.imageHeight - height) * Number(document.getElementById('night-inspector-y').value) / 100);
-        const key = `${x}:${y}:${width}:${height}`;
+        const key = `${x}:${y}:${width}:${height}:${JSON.stringify(this.crop)}`;
         let inspector = this._nightInspector;
         if (!inspector) {
             inspector = this._nightInspector = {
@@ -491,19 +491,14 @@ class App {
             };
         }
         if (inspector.image !== this.image || inspector.key !== key) {
-            const sx = Math.max(0, x - pad), sy = Math.max(0, y - pad);
-            const source = document.createElement('canvas');
-            source.width = Math.min(this.imageWidth, x + width + pad) - sx;
-            source.height = Math.min(this.imageHeight, y + height + pad) - sy;
-            source.getContext('2d').drawImage(this.image, sx, sy, source.width, source.height,
-                0, 0, source.width, source.height);
-            inspector.engine.loadImage(source);
+            inspector.engine.loadImage(this.image);
+            inspector.engine.setCrop(this.cropTool?.active ? null : this.crop);
             inspector.engine.setRenderSize(width, height);
-            inspector.engine.setRegion((x - sx) / source.width, (y - sy) / source.height,
-                width / source.width, height / source.height);
+            inspector.engine.setRegion(x / this.imageWidth, y / this.imageHeight,
+                width / this.imageWidth, height / this.imageHeight);
+            inspector.engine.loadExportTile(this.image, { noiseLuma: 100, noiseColor: 100, motionAmount: 100 });
             inspector.image = this.image;
             inspector.key = key;
-            source.width = source.height = 1;
         }
         inspector.engine.renderComposite({ ...NightTools.settings(adj), showOriginal: adj.showOriginal }, []);
     }
@@ -728,18 +723,20 @@ class App {
         const geometry = document.createElement('details');
         geometry.id = 'mask-geometry';
         const geometryTitle = document.createElement('summary');
-        geometryTitle.textContent = 'Refine radial position & feather';
+        geometryTitle.textContent = 'Refine radial position, feather & tilt';
         geometry.appendChild(geometryTitle);
         const geometryFields = document.createElement('div');
         geometryFields.className = 'mask-geometry-grid';
         this.maskGeometryInputs = {};
         for (const [key, label] of [['cx', 'Center X (%)'], ['cy', 'Center Y (%)'],
-            ['rx', 'Horizontal radius (%)'], ['ry', 'Vertical radius (%)'], ['feather', 'Feather (%)']]) {
+            ['rx', 'Horizontal radius (%)'], ['ry', 'Vertical radius (%)'], ['feather', 'Feather (%)'],
+            ['angle', 'Tilt (°)']]) {
             const field = document.createElement('label');
             field.textContent = label;
             const input = document.createElement('input');
-            input.type = 'number'; input.min = key === 'rx' || key === 'ry' ? '0.1' : '0';
-            input.max = '100'; input.step = '0.01';
+            input.type = 'number';
+            input.min = key === 'angle' ? '-180' : key === 'rx' || key === 'ry' ? '0.1' : '0';
+            input.max = key === 'angle' ? '180' : '100'; input.step = '0.01';
             input.id = `mask-geometry-${key}`;
             input.addEventListener('change', () => {
                 if (!input.value || !input.checkValidity()) { this._syncMaskSliders(); return; }
@@ -915,6 +912,7 @@ class App {
             document.getElementById('mask-geometry').hidden = mask?.type !== 'radial' || !mask.params;
             if (mask?.type === 'radial' && mask.params) {
                 for (const [key, input] of Object.entries(this.maskGeometryInputs)) {
+                    if (key === 'angle') { input.value = Number((mask.params.angle || 0).toFixed(2)); continue; }
                     const dimension = key === 'feather' ? 100 : ['cx', 'rx'].includes(key) ? mask.canvas.width : mask.canvas.height;
                     input.value = Number((mask.params[key] / dimension * 100).toFixed(2));
                 }
@@ -993,6 +991,9 @@ class App {
                         window.library.activeIndex = -1;
                         await window.library.addFiles([file], ImageImport.thumb(this.image));
                         window.library.activeIndex = window.library.photos.findIndex(p => p.id === window.library._photoId(file));
+                        const photo = window.library.photos[window.library.activeIndex];
+                        if (photo) await window.library._restoreEdits(photo).catch(error =>
+                            this._importStatus(`Could not restore saved edits: ${error.message}`, true));
                     }
                 }
             }
@@ -1023,7 +1024,14 @@ class App {
             const file = e.dataTransfer.files[0];
             if (file) {
                 await window.library?._saveCurrentEdits();
-                if (await this._loadFile(file) && window.library) window.library.activeIndex = -1;
+                if (await this._loadFile(file) && window.library) {
+                    window.library.activeIndex = -1;
+                    await window.library.addFiles([file], ImageImport.thumb(this.image));
+                    window.library.activeIndex = window.library.photos.findIndex(p => p.id === window.library._photoId(file));
+                    const photo = window.library.photos[window.library.activeIndex];
+                    if (photo) await window.library._restoreEdits(photo).catch(error =>
+                        this._importStatus(`Could not restore saved edits: ${error.message}`, true));
+                }
             }
         });
 
@@ -1049,9 +1057,15 @@ class App {
         const canvas = document.getElementById('main-canvas');
         this._bindHoldCompare(canvas, true, true);
         window.addEventListener('blur', () => this._stopComparison());
-        window.addEventListener('pagehide', () => this._exportController?.abort());
+        window.addEventListener('pagehide', () => {
+            this._exportController?.abort();
+            window.library?._saveCurrentEdits();
+        });
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden) this._stopComparison();
+            if (document.hidden) {
+                this._stopComparison();
+                window.library?._saveCurrentEdits();
+            }
         });
         this.viewport = new PhotoViewport(this);
 
@@ -1312,13 +1326,13 @@ class App {
     _canvasToImage(e) {
         const canvas = document.getElementById('main-canvas');
         const rect = canvas.getBoundingClientRect();
-        const scaleX = this.imageWidth / rect.width;
-        const scaleY = this.imageHeight / rect.height;
+        const source = CropGeometry.point(this._geometry(), {
+            x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height });
         return {
             canvasX: e.clientX - rect.left,
             canvasY: e.clientY - rect.top,
-            imgX: (e.clientX - rect.left) * scaleX,
-            imgY: (e.clientY - rect.top) * scaleY,
+            imgX: source.x * this.sourceWidth,
+            imgY: source.y * this.sourceHeight,
         };
     }
 
@@ -1392,6 +1406,7 @@ class App {
     }
 
     async _loadFile(file, options = {}) {
+        if (this.cropTool?.active) this.cropTool.cancel();
         this._cancelDetection('Photo changed. Detection cancelled.');
         if (this.polygon?.active) this._exitMaskMode();
         this.viewport?.cancel();
@@ -1413,12 +1428,9 @@ class App {
             const img = decoded.image;
             if (controller.signal.aborted) { ImageImport.release(img); return false; }
             this.glEngine.loadImage(img);
-            if (this._preCropImage !== this.image) ImageImport.release(this._preCropImage);
-            this._preCropImage = null;
-            this._preCropSnapshot = null;
             ImageImport.release(this.image);
             this.image = img;
-            this._sourceCrops = [];
+            this.crop = null;
             this.imageWidth = img.naturalWidth || img.width;
             this.imageHeight = img.naturalHeight || img.height;
             this._fileName = file.name ? file.name.replace(/\.[^.]+$/, '') : 'ABEL_photo';
@@ -1543,6 +1555,32 @@ class App {
 
     // ======================== Render ========================
 
+    get sourceWidth() { return this.image?.naturalWidth || this.image?.width || this.imageWidth; }
+    get sourceHeight() { return this.image?.naturalHeight || this.image?.height || this.imageHeight; }
+
+    _geometry(crop = this.cropTool?.active ? null : this.crop) {
+        return CropGeometry.matrix(crop, this.sourceWidth, this.sourceHeight);
+    }
+
+    _drawSource(ctx, width, height) {
+        CropGeometry.draw(ctx, this.image, CropGeometry.inverse(this._geometry()), width, height);
+    }
+
+    _setCrop(crop) {
+        const next = CropGeometry.validate(crop, this.sourceWidth, this.sourceHeight);
+        const changed = JSON.stringify(next) !== JSON.stringify(this.crop || null);
+        this.crop = next;
+        this.imageWidth = next?.width || this.sourceWidth;
+        this.imageHeight = next?.height || this.sourceHeight;
+        this.glEngine?.setCrop(next);
+        if (changed) {
+            this._cancelDetection('Crop changed. Detection cancelled.');
+            this._exportController?.abort();
+            this.review?.invalidate('Framing changed. Request a fresh review.');
+            this._fitCanvas();
+        }
+    }
+
     _requestRender(maskOverlay = false) {
         this._pendingMaskOverlay ||= maskOverlay;
         clearTimeout(this._previewSettleTimer);
@@ -1651,11 +1689,11 @@ class App {
         if (this._detection && this._detection.signature !== this._detectionSignature())
             this._cancelDetection('Edit changed. Detection cancelled; detect again when ready.');
         const signature = JSON.stringify({
-            size: [this.imageWidth, this.imageHeight], state: this.state, curves: this.curveEditor?.channels, masks: this.maskEngine.describeMasks()
+            crop: this.crop || null, state: this.state, curves: this.curveEditor?.channels, masks: this.maskEngine.describeMasks()
         });
         // Don't push if same as current
         if (!force && this.historyIndex >= 0 && this.history[this.historyIndex].signature === signature) return;
-        const snap = { signature, state: JSON.stringify(this.state),
+        const snap = { signature, crop: this.crop ? { ...this.crop } : null, state: JSON.stringify(this.state),
             curves: this.curveEditor ? JSON.parse(JSON.stringify(this.curveEditor.channels)) : null,
             masks: this.maskEngine.captureMasks() };
 
@@ -1671,24 +1709,27 @@ class App {
         while (this.history.length > 100 || (this.history.length > 2 && historyBytes() > 72 * 1024 * 1024)) {
             this.history.shift();
             this.historyIndex--;
-            if (this._preCropImage) this._preCropHistoryIndex = Math.max(0, this._preCropHistoryIndex - 1);
         }
 
         this._updateHistoryButtons();
+        window.library?._queueSave?.();
     }
 
     _restoreHistory() {
         const snapshot = this.history[this.historyIndex];
+        if (this.cropTool?.active) this.cropTool.deactivate();
+        this._setCrop(snapshot.crop || null);
         this.state = JSON.parse(snapshot.state);
         if (snapshot.curves && this.curveEditor) {
             this.curveEditor.channels = JSON.parse(JSON.stringify(snapshot.curves));
             this.curveEditor.draw();
         }
-        this.maskEngine.restoreMasks(snapshot.masks);
+        this.maskEngine.restoreMasks(snapshot.masks, true);
         this._exitMaskMode();
         this._updateMaskList();
         this._syncMaskSliders();
         this._syncSlidersFromState();
+        window.library?._queueSave?.();
     }
 
     _undo() {
@@ -1696,28 +1737,6 @@ class App {
         this._stopComparison();
         clearTimeout(this._historyDebounce);
         this._pushHistory();
-        // If a crop was just applied, undo it by restoring the original image
-        if (this._preCropImage && this.historyIndex <= this._preCropHistoryIndex) {
-            this.image = this._preCropImage;
-            this._sourceCrops = this._preCropCrops || [];
-            this.imageWidth = this._preCropWidth;
-            this.imageHeight = this._preCropHeight;
-            this.glEngine.loadImage(this.image);
-            this._fitCanvas();
-            this._preCropImage = null;
-            this._preCropWidth = null;
-            this._preCropHeight = null;
-            this._preCropHistoryIndex = null;
-            // Crop redo is not supported; discard edits based on the cropped image.
-            this.history = this.history.slice(0, this.historyIndex + 1);
-            if (this._preCropSnapshot) this.history[this.historyIndex] = this._preCropSnapshot;
-            this._preCropSnapshot = null;
-            this._restoreHistory();
-            this._hideCompositeOverlay();
-            this._render();
-            this._updateHistoryButtons();
-            return;
-        }
         if (this.historyIndex <= 0) return;
         this.historyIndex--;
         this._restoreHistory();
@@ -1738,7 +1757,7 @@ class App {
     }
 
     _updateHistoryButtons() {
-        document.getElementById('btn-undo').disabled = this.historyIndex <= 0 && !this._preCropImage;
+        document.getElementById('btn-undo').disabled = this.historyIndex <= 0;
         document.getElementById('btn-redo').disabled = this.historyIndex >= this.history.length - 1;
     }
 
@@ -1768,11 +1787,8 @@ class App {
         this._stopComparison();
         this.review?.invalidate('Ready for a fresh review of your photo.');
         clearTimeout(this._historyDebounce);
-        this._preCropImage = null;
-        this._preCropWidth = null;
-        this._preCropHeight = null;
-        this._preCropHistoryIndex = null;
-        this._preCropSnapshot = null;
+        if (this.cropTool?.active) this.cropTool.deactivate();
+        if (this.image) this._setCrop(null);
         this.state = this._defaultState();
         this.maskEngine.masks = [];
         this.maskEngine.activeMaskIndex = -1;
@@ -1815,7 +1831,7 @@ class App {
         tempCanvas.width = sw;
         tempCanvas.height = sh;
         const ctx = tempCanvas.getContext('2d');
-        ctx.drawImage(this.image, 0, 0, sw, sh);
+        this._drawSource(ctx, sw, sh);
         const imageData = ctx.getImageData(0, 0, sw, sh);
 
         const auto = AutoEdit.autoAll(imageData);
@@ -1855,7 +1871,7 @@ class App {
     // ======================== AI Segmentation ========================
 
     _detectionSignature() {
-        return JSON.stringify({ size: [this.imageWidth, this.imageHeight],
+        return JSON.stringify({ crop: this.crop || null, size: [this.imageWidth, this.imageHeight],
             state: this.state, curves: this.curveEditor?.channels, masks: this.maskEngine.describeMasks() });
     }
 
@@ -1907,7 +1923,7 @@ class App {
             const canvas = document.createElement('canvas');
             canvas.width = size.width; canvas.height = size.height;
             const context = canvas.getContext('2d');
-            context.drawImage(this.image, 0, 0, size.width, size.height);
+            this._drawSource(context, size.width, size.height);
             const rgba = context.getImageData(0, 0, size.width, size.height).data;
             worker = new Worker(new URL('js/segmentation-worker.js?v=semantic-1', document.baseURI), { type: 'module' });
             const task = this._detection = { worker, kind, image: this.image, signature: this._detectionSignature() };
@@ -1940,7 +1956,7 @@ class App {
                     const staging = new MaskEngine(this);
                     staging._nextMaskId = this.maskEngine._nextMaskId;
                     const mask = staging.createMask('brush');
-                    mask.ctx.drawImage(seed, 0, 0, mask.canvas.width, mask.canvas.height);
+                    CropGeometry.draw(mask.ctx, seed, this._geometry(), mask.canvas.width, mask.canvas.height);
                     staging.touch(mask);
                     mask.name = kind === 'sky' ? 'Sky' : 'Subject';
                     mask.detection = { kind, model: SemanticMasks.models[kind].label, version: 1 };
@@ -2090,6 +2106,7 @@ class App {
         } finally {
             // Export never leaves a partial tile or a resized composite on the photo.
             engine.loadImage(this.image);
+            engine.setCrop(this.crop);
             this._render();
         }
     }
@@ -2102,6 +2119,8 @@ class App {
         const canvas = document.createElement('canvas');
         const engine = new GLEngine(canvas);
         try {
+            engine.loadImage(source);
+            engine.setCrop(this.crop);
             engine.updateCurveLUT(this.curveEditor.getLUT());
             return await engine.exportImageAsync(source, { ...state, showOriginal: false }, masks, scale, options);
         } finally {
@@ -2409,6 +2428,19 @@ class CropTool {
 
         row.appendChild(header);
         row.appendChild(input);
+        for (const [id, parent] of [['crop-reset', row], ['mcrop-reset', document.querySelector('.mcrop-bottom')]]) {
+            if (!parent) continue;
+            const reset = document.createElement('button');
+            reset.id = id;
+            reset.className = id === 'mcrop-reset' ? 'mcrop-btn' : 'btn btn-outline';
+            reset.textContent = 'Reset crop';
+            reset.addEventListener('click', () => {
+                this.cropX = this.cropY = 0; this.cropW = this.cropH = 1;
+                this.aspectRatio = null;
+                this._setRotation(0);
+            });
+            parent.appendChild(reset);
+        }
     }
 
     _bindEvents() {
@@ -2503,20 +2535,39 @@ class CropTool {
     }
 
     activate() {
-        if (!this.app.image) return;
+        if (!this.app.image || this.active) return;
         this.app._cancelDetection('Crop opened. Detection cancelled.');
+        this.app._stopComparison();
+        this.app._exitMaskMode();
+        this.app.review?.invalidate('Crop is non-destructive. Apply framing before requesting a review.');
+        clearTimeout(this.app._historyDebounce);
+        this.app._pushHistory();
         this.app.viewport?.reset();
         document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
         this.active = true;
         this.app._syncDetectionButtons();
         this.app._updateNightButtons();
         this.app.review?.updateButtons();
-        this.rotation = 0;
-        this.cropX = 0; this.cropY = 0;
-        this.cropW = 1; this.cropH = 1;
+        const crop = this.app.crop;
+        const iw = this.app.sourceWidth, ih = this.app.sourceHeight;
+        this.rotation = crop?.rotation || 0;
+        for (const input of [this._rotSlider, document.getElementById('mcrop-rotation')]) {
+            if (input) { input.min = Math.min(-45, this.rotation); input.max = Math.max(45, this.rotation); }
+        }
+        this.cropX = (crop?.x || 0) / iw; this.cropY = (crop?.y || 0) / ih;
+        this.cropW = (crop?.width || iw) / iw; this.cropH = (crop?.height || ih) / ih;
+        this.app.imageWidth = iw; this.app.imageHeight = ih;
+        this.app.glEngine.setCrop(null);
+        this.app._fitCanvas();
+        this.app._render();
         this.aspectRatio = null;
-        this._rotSlider.value = 0;
-        this._rotVal.textContent = '0°';
+        this._rotSlider.value = this.rotation;
+        this._rotVal.textContent = this.rotation.toFixed(1) + '°';
+        const mobileRotation = document.getElementById('mcrop-rotation');
+        if (mobileRotation) mobileRotation.value = this.rotation;
+        const mobileAngle = document.getElementById('mcrop-angle');
+        if (mobileAngle) mobileAngle.textContent = this._rotVal.textContent;
+        this.app._importStatus('Non-destructive crop · drag the frame outward to recover hidden edges. Reset crop restores the full photo.');
 
         // Reset aspect ratio buttons
         const container = document.getElementById('crop-ratios');
@@ -2546,6 +2597,11 @@ class CropTool {
     deactivate() {
         this.app._cancelDetection('Crop changed. Detection cancelled.');
         this.active = false;
+        this.app.imageWidth = this.app.crop?.width || this.app.sourceWidth;
+        this.app.imageHeight = this.app.crop?.height || this.app.sourceHeight;
+        this.app.glEngine.setCrop(this.app.crop);
+        this.app._fitCanvas();
+        this.app._render();
         this._cropTouch = null;
         this._cropMultitouch = false;
         this._onPointerUp();
@@ -2834,115 +2890,31 @@ class CropTool {
     }
 
     apply() {
-        if (!this.app.image) return;
-
-        // Store original image for undo
-        this.app._stopComparison();
-        this.app.review?.invalidate('Crop changed. Request a fresh review after cropping.');
-        clearTimeout(this.app._historyDebounce);
-        this.app._pushHistory();
-        this.app._preCropHistoryIndex = this.app.historyIndex;
-        this.app._preCropSnapshot = this.app.history[this.app.historyIndex];
-        if (this.app._preCropImage !== this.app.image) ImageImport.release(this.app._preCropImage);
-        this.app._preCropImage = this.app.image;
-        this.app._preCropWidth = this.app.imageWidth;
-        this.app._preCropHeight = this.app.imageHeight;
-        this.app._preCropCrops = this.app._sourceCrops || [];
-
-        const iw = this.app.imageWidth;
-        const ih = this.app.imageHeight;
-
-        // Crop in source coordinates, not the bounded interactive preview's pixels.
-        const workW = iw, workH = ih;
-
-        const sx = Math.round(this.cropX * workW);
-        const sy = Math.round(this.cropY * workH);
-        const sw = Math.round(this.cropW * workW);
-        const sh = Math.round(this.cropH * workH);
-        const detectedMasks = this.app.maskEngine.cropDetectedMasks({
-            x: sx, y: sy, width: sw, height: sh, rotation: Math.abs(this.rotation) < .1 ? 0 : this.rotation,
-            sourceWidth: iw, sourceHeight: ih,
-        });
-
-        const out = document.createElement('canvas');
-        out.width = sw;
-        out.height = sh;
-        const ctx = out.getContext('2d');
-
-        if (Math.abs(this.rotation) < 0.1) {
-            // Simple crop, no rotation
-            ctx.drawImage(this.app.image, sx, sy, sw, sh, 0, 0, sw, sh);
-        } else {
-            // Draw the full image rotated at working resolution, then crop from it
-            const rad = this.rotation * Math.PI / 180;
-            const rotCanvas = document.createElement('canvas');
-            rotCanvas.width = workW;
-            rotCanvas.height = workH;
-            const rCtx = rotCanvas.getContext('2d');
-            rCtx.translate(workW / 2, workH / 2);
-            rCtx.rotate(rad);
-            rCtx.translate(-workW / 2, -workH / 2);
-            rCtx.drawImage(this.app.image, 0, 0, workW, workH);
-
-            ctx.drawImage(rotCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
-        }
-
-        // Clear CSS rotation preview
-        document.getElementById('main-canvas').style.transform = 'translate(-50%, -50%)';
-        document.getElementById('mobile-crop-bar')?.classList.remove('visible');
-
-        // Replace the app's source image
-        const sourceImage = this.app.image;
-        const sourceRotation = this.rotation;
-        const newImg = new Image();
-        let cropURL;
-        newImg.onload = () => {
-            URL.revokeObjectURL(cropURL);
-            if (this.app.image !== sourceImage) return;
-            this.app.image = newImg;
-            this.app._sourceCrops = [...this.app._preCropCrops, {
-                x: sx, y: sy, width: sw, height: sh,
-                rotation: Math.abs(sourceRotation) < .1 ? 0 : sourceRotation,
-                sourceWidth: iw, sourceHeight: ih,
-            }];
-            this.app._exportController?.abort();
-            this.app.imageWidth = newImg.width;
-            this.app.imageHeight = newImg.height;
-            this.app.state.motionAngle = ((this.app.state.motionAngle || 0) + sourceRotation + 180) % 180;
-            this.app._syncSlidersFromState();
-            this.app.glEngine.loadImage(newImg);
-            this.app._fitCanvas();
-            this.app._hideCompositeOverlay();
-
-            // Painted semantic boundaries transform with the source, not the preview.
-            this.app.maskEngine.masks = detectedMasks;
-            this.app.maskEngine.activeMaskIndex = detectedMasks.length ? 0 : -1;
-            this.app._exitMaskMode();
-            this.app._updateMaskList();
-            this.app._syncMaskSliders();
-            // Keep a cropped baseline at the crop boundary, not a mask-only undo step.
-            this.app.history = this.app.history.slice(0, this.app._preCropHistoryIndex);
-            this.app.historyIndex = this.app.history.length - 1;
-            this.app._pushHistory(true);
-            this.app._render();
-            this.app._updateHistoryButtons();
-
+        if (!this.app.image || !this.active) return;
+        const iw = this.app.sourceWidth, ih = this.app.sourceHeight;
+        const current = this.app.crop;
+        if (current && Math.round(this.cropX * iw) === current.x && Math.round(this.cropY * ih) === current.y &&
+            Math.round(this.cropW * iw) === current.width && Math.round(this.cropH * ih) === current.height &&
+            this.rotation === current.rotation) {
             this.deactivate();
-        };
-        newImg.onerror = () => {
-            URL.revokeObjectURL(cropURL);
-            this.app._importStatus('The browser could not load this crop. Try a smaller crop or Smaller RAW.', true);
-        };
-        out.toBlob(blob => {
-            out.width = out.height = 1;
-            if (this.app.image !== sourceImage) return;
-            if (!blob) {
-                this.app._importStatus('The browser could not encode this crop. Try a smaller crop or Smaller RAW.', true);
-                return;
-            }
-            cropURL = URL.createObjectURL(blob);
-            newImg.src = cropURL;
-        }, 'image/png');
+            return;
+        }
+        const x = Math.max(0, Math.min(iw - 1, Math.round(this.cropX * iw)));
+        const y = Math.max(0, Math.min(ih - 1, Math.round(this.cropY * ih)));
+        let crop;
+        try {
+            crop = CropGeometry.validate({ version: 1, sourceWidth: iw, sourceHeight: ih, x, y,
+                width: Math.max(1, Math.min(iw - x, Math.round(this.cropW * iw))),
+                height: Math.max(1, Math.min(ih - y, Math.round(this.cropH * ih))),
+                rotation: Math.abs(this.rotation) < .1 ? 0 : this.rotation }, iw, ih);
+        } catch (error) {
+            this.app._importStatus(error.message.replace('Saved crop', 'Crop'), true);
+            return;
+        }
+        this.app._setCrop(crop);
+        this.deactivate();
+        this.app._pushHistory();
+        this.app._importStatus(`${this.app.imageWidth} × ${this.app.imageHeight} · crop saved non-destructively. Reopen Crop to expand or reset.`);
     }
 
     cancel() {
@@ -2989,14 +2961,36 @@ class Library {
 
     async _initDB() {
         return new Promise((resolve) => {
-            const req = indexedDB.open('ABEL-library', 2);
+            const req = indexedDB.open('ABEL-library', 3);
             req.onupgradeneeded = (e) => {
                 const db = e.target.result;
                 if (!db.objectStoreNames.contains('edits')) db.createObjectStore('edits', { keyPath: 'id' });
                 if (!db.objectStoreNames.contains('thumbs')) db.createObjectStore('thumbs', { keyPath: 'id' });
                 if (!db.objectStoreNames.contains('config')) db.createObjectStore('config', { keyPath: 'key' });
+                if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos', { keyPath: 'id' });
             };
-            req.onsuccess = (e) => { this.db = e.target.result; resolve(); };
+            req.onsuccess = (e) => {
+                this.db = e.target.result;
+                this.db.onversionchange = () => this.db.close();
+                const stored = this.db.transaction('photos', 'readonly').objectStore('photos').getAll();
+                stored.onsuccess = () => {
+                    for (const photo of stored.result)
+                        if (!this.photos.some(p => p.id === photo.id)) this.photos.push(photo);
+                    const edits = this.db.transaction('thumbs', 'readonly').objectStore('thumbs').getAll();
+                    edits.onsuccess = () => {
+                        for (const saved of edits.result) {
+                            const photo = this.photos.find(p => p.id === saved.id);
+                            if (photo) {
+                                if (saved.thumbUrl) photo.thumbUrl = saved.thumbUrl;
+                                photo.hasEdits = saved.hasEdits !== false;
+                            }
+                        }
+                        this._renderGrid(); this._renderFilmstrip(); resolve();
+                    };
+                    edits.onerror = () => resolve();
+                };
+                stored.onerror = () => resolve();
+            };
             req.onerror = () => resolve();
         });
     }
@@ -3122,7 +3116,10 @@ class Library {
                 continue;
             }
 
-            this.photos.push({ id, name: entry.name, fileHandle, thumbUrl, hasEdits });
+            const photo = { id, name: entry.name, fileHandle, thumbUrl, hasEdits };
+            const saved = await this._readEdits(photo);
+            if (saved?.thumbUrl) photo.thumbUrl = saved.thumbUrl;
+            this.photos.push(photo);
         }
 
         // Sort alphabetically
@@ -3196,7 +3193,13 @@ class Library {
                 this.app._importStatus(`${file.name}: ${error.message}`, true);
                 continue;
             }
-            this.photos.push({ id, name: file.name, file, thumbUrl, hasEdits: false });
+            const photo = { id, name: file.name, file, thumbUrl, hasEdits: false };
+            this.photos.push(photo);
+            if (this.db) {
+                const tx = this.db.transaction('photos', 'readwrite');
+                tx.objectStore('photos').put(photo);
+                tx.onerror = () => this.app._importStatus('Browser storage could not retain this original. Keep the original file to reopen your edits.', true);
+            }
 
             if (this.db) {
                 try {
@@ -3277,14 +3280,49 @@ class Library {
         this._renderGrid();
     }
 
+    _queueSave() {
+        clearTimeout(this._saveTimer);
+        this._saveTimer = setTimeout(() => this._saveCurrentEdits().catch(error =>
+            this.app._importStatus(`Edits could not be saved: ${error.message}. Keep the original and this tab open.`, true)), 900);
+    }
+
+    _maskPNG(mask) {
+        this._maskPNGs ||= new WeakMap();
+        let cached = this._maskPNGs.get(mask.canvas);
+        if (!cached || cached.revision !== mask.revision) {
+            cached = { revision: mask.revision, data: mask.canvas.toDataURL('image/png') };
+            this._maskPNGs.set(mask.canvas, cached);
+        }
+        return cached.data;
+    }
+
     async _saveCurrentEdits() {
-        if (this.activeIndex < 0 || !this.app.image) return;
+        clearTimeout(this._saveTimer);
+        if (this.activeIndex < 0 || !this.app.image || this.app._importController || this._restoring) return;
         const photo = this.photos[this.activeIndex];
-        if (!photo) return;
+        if (!photo || photo._restoreFailed || (photo.fileHandle ? photo.name !== this.app._originalFile?.name
+            : photo.id !== this._photoId(this.app._originalFile))) return;
+        if (this.app.review?._applyFrame) this.app.review.apply();
+        this.app._pushHistory();
+        clearTimeout(this._saveTimer);
+        const pixels = [], pixelIDs = new Map();
+        const history = this.app.history.map(snapshot => ({
+            state: JSON.parse(snapshot.state), curves: snapshot.curves, crop: snapshot.crop || null,
+            masks: snapshot.masks.map(mask => {
+                if (!pixelIDs.has(mask.canvas)) {
+                    pixelIDs.set(mask.canvas, pixels.length);
+                    pixels.push(this._maskPNG(mask));
+                }
+                const { canvas, ...metadata } = mask;
+                return { ...metadata, pixels: pixelIDs.get(canvas) };
+            }),
+        }));
 
         const editData = {
             rawHalfSize: this.app._rawInfo?.halfSize,
-            sourceCrops: this.app._sourceCrops || [],
+            geometryVersion: 1,
+            crop: this.app.crop ? { ...this.app.crop } : null,
+            history: { version: 1, entries: history, index: this.app.historyIndex, pixels },
             state: JSON.parse(JSON.stringify(this.app.state)),
             curves: JSON.parse(JSON.stringify(this.app.curveEditor.channels)),
             masks: this.app.maskEngine.masks.map(m => ({
@@ -3294,36 +3332,47 @@ class Library {
                 visible: m.visible,
                 name: m.name, reason: m.reason, blend: m.blend, params: m.params, opacity: m.opacity ?? 1,
                 detection: m.detection, skyPreset: m.skyPreset, polygonBaked: m.polygonBaked,
-                canvasData: m.canvas.toDataURL('image/png'),
+                canvasData: this._maskPNG(m),
             })),
             timestamp: Date.now(),
         };
 
         const defaultState = this.app._defaultState();
         const isEdited = JSON.stringify(editData.state) !== JSON.stringify(defaultState) ||
-            editData.masks.length > 0 || editData.sourceCrops.length > 0 || !this.app.curveEditor._isIdentity();
+            editData.masks.length > 0 || !!editData.crop || !this.app.curveEditor._isIdentity();
         const hadEdits = photo.hasEdits;
         photo.hasEdits = isEdited;
 
-        if (isEdited || hadEdits) {
-            // If we have FS access and this photo came from a folder, write sidecar file
-            if (this.dirHandle && photo.fileHandle) {
-                try {
-                    const sidecarHandle = await this.dirHandle.getFileHandle(
-                        photo.name + '.ABEL.json', { create: true }
-                    );
-                    const writable = await sidecarHandle.createWritable();
-                    await writable.write(JSON.stringify(editData, null, 2));
-                    await writable.close();
-                } catch (e) { console.error('Save sidecar failed:', e); }
-            }
-            // Also save to IndexedDB as backup
-            if (this.db) {
-                try {
-                    const tx = this.db.transaction('edits', 'readwrite');
-                    tx.objectStore('edits').put({ id: photo.id, ...editData });
-                } catch (e) { /* ignore */ }
-            }
+        if (!this.app.cropTool?.active) {
+            photo.thumbUrl = ImageImport.thumb(this.app._renderedCanvas());
+            editData.thumbUrl = photo.thumbUrl;
+        }
+        if (isEdited || hadEdits || this.app.history.length > 1) {
+            const directory = this.dirHandle, database = this.db, thumbUrl = photo.thumbUrl;
+            const previous = this._saving || Promise.resolve();
+            const job = this._saving = previous.catch(() => {}).then(async () => {
+                if (directory && photo.fileHandle) {
+                    try {
+                        const sidecarHandle = await directory.getFileHandle(photo.name + '.ABEL.json', { create: true });
+                        const writable = await sidecarHandle.createWritable();
+                        await writable.write(JSON.stringify(editData, null, 2));
+                        await writable.close();
+                    } catch (e) { this.app._importStatus(`Could not save sidecar: ${e.message}. Browser backup will be attempted.`, true); }
+                }
+                if (database) {
+                    try {
+                        const tx = database.transaction(['edits', 'thumbs'], 'readwrite');
+                        tx.objectStore('edits').put({ id: photo.id, ...editData });
+                        tx.objectStore('thumbs').put({ id: photo.id, thumbUrl, hasEdits: isEdited });
+                        await new Promise((resolve, reject) => {
+                            tx.oncomplete = resolve;
+                            tx.onerror = tx.onabort = () => reject(tx.error || new Error('Storage transaction failed.'));
+                        });
+                    } catch (e) { this.app._importStatus(`Edits could not be saved: ${e.message}. Keep this tab open and export your photo.`, true); }
+                }
+            });
+            await job;
+            if (this._saving === job) this._saving = null;
         }
     }
 
@@ -3357,56 +3406,37 @@ class Library {
 
     async _restoreEdits(photo, editData) {
         if (editData === undefined) editData = await this._readEdits(photo);
+        const source = this.app.image;
+        this._restoring = true;
+        try {
         if (editData && editData.state) {
             if (editData.masks?.some(mask => mask.type === 'polygon' && !PolygonGeometry.validParams(mask.params)))
                 throw new Error('Invalid saved polygon: use 3–64 distinct, non-crossing corners inside the photo.');
             if (this.app.polygon?.active) this.app._exitMaskMode();
-            // Reconstruct source geometry before restoring painted boundaries.
-            const crops = editData.sourceCrops || [];
-            if (JSON.stringify(crops) !== JSON.stringify(this.app._sourceCrops || [])) {
-                if (!Array.isArray(crops) || crops.length > 100) throw new Error('Invalid saved crop geometry.');
-                let source = this.app.image;
-                for (const crop of crops) {
-                    const sw = source.naturalWidth || source.width, sh = source.naturalHeight || source.height;
-                    if (!crop || !['x', 'y', 'width', 'height', 'sourceWidth', 'sourceHeight', 'rotation']
-                        .every(key => Number.isFinite(crop[key])) || crop.sourceWidth !== sw || crop.sourceHeight !== sh ||
-                        crop.x < 0 || crop.y < 0 || crop.width < 1 || crop.height < 1 ||
-                        crop.x + crop.width > sw + 1 || crop.y + crop.height > sh + 1 || Math.abs(crop.rotation) > 45)
-                        throw new Error('Saved crop does not match this photo’s dimensions.');
-                    const canvas = document.createElement('canvas');
-                    canvas.width = crop.width; canvas.height = crop.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.translate(-crop.x + sw / 2, -crop.y + sh / 2);
-                    ctx.rotate(crop.rotation * Math.PI / 180);
-                    ctx.translate(-sw / 2, -sh / 2);
-                    ctx.drawImage(source, 0, 0, sw, sh);
-                    if (source !== this.app.image) { source.width = source.height = 1; }
-                    source = canvas;
-                }
-                if (source !== this.app.image) {
-                    this.app.glEngine.loadImage(source);
-                    ImageImport.release(this.app.image);
-                    this.app.image = source;
-                    this.app.imageWidth = source.width; this.app.imageHeight = source.height;
-                    this.app._sourceCrops = crops;
-                    this.app._fitCanvas();
-                }
-            }
+            if (editData.geometryVersion !== undefined && editData.geometryVersion !== 1)
+                throw new Error('Unsupported saved crop version.');
+            const legacy = editData.geometryVersion !== 1;
+            const crop = legacy ? CropGeometry.legacy(editData.sourceCrops || [], this.app.sourceWidth, this.app.sourceHeight)
+                : CropGeometry.validate(editData.crop, this.app.sourceWidth, this.app.sourceHeight);
+            this.app._setCrop(crop);
             this.app.state = { ...this.app._defaultState(), ...editData.state };
+            if (legacy && crop)
+                this.app.state.motionAngle = ((this.app.state.motionAngle - crop.rotation) % 180 + 180) % 180;
             if (editData.curves) {
                 this.app.curveEditor.channels = ReviewContract.validateCurves(editData.curves);
                 this.app.curveEditor.draw();
             }
             this.app._syncSlidersFromState();
+            const restoration = JSON.stringify({ crop: this.app.crop, state: this.app.state,
+                curves: this.app.curveEditor.channels });
 
             // Restore masks
-            this.app.maskEngine.masks = [];
-            this.app.maskEngine.activeMaskIndex = -1;
+            const restoringMasks = new MaskEngine(this.app);
             if (editData.masks && editData.masks.length > 0) {
                 const maskPromises = editData.masks.map(savedMask => {
                     return new Promise((resolve) => {
-                        this.app.maskEngine.createMask(savedMask.type);
-                        const mask = this.app.maskEngine.getActiveMask();
+                        restoringMasks.createMask(savedMask.type);
+                        const mask = restoringMasks.getActiveMask();
                         if (!mask) { resolve(); return; }
                         mask.adjustments = ManualControls.normalize(savedMask.adjustments);
                         mask.inverted = savedMask.inverted;
@@ -3421,7 +3451,9 @@ class Library {
                         mask.params = savedMask.params;
 
                         if (mask.type === 'polygon') {
-                            this.app.maskEngine.setPolygon(mask, savedMask.params.points, savedMask.params.feather);
+                            const points = legacy && crop ? savedMask.params.points.map(p =>
+                                CropGeometry.point(this.app._geometry(), p)) : savedMask.params.points;
+                            restoringMasks.setPolygon(mask, points, savedMask.params.feather);
                             resolve();
                             return;
                         }
@@ -3430,8 +3462,10 @@ class Library {
                         if (savedMask.canvasData) {
                             const img = new Image();
                             img.onload = () => {
-                                mask.ctx.drawImage(img, 0, 0, mask.canvas.width, mask.canvas.height);
-                                this.app.maskEngine.touch(mask);
+                                if (legacy && crop) CropGeometry.draw(mask.ctx, img, this.app._geometry(),
+                                    mask.canvas.width, mask.canvas.height);
+                                else mask.ctx.drawImage(img, 0, 0, mask.canvas.width, mask.canvas.height);
+                                restoringMasks.touch(mask);
                                 resolve();
                             };
                             img.onerror = () => resolve();
@@ -3443,14 +3477,79 @@ class Library {
                 });
                 await Promise.all(maskPromises);
             }
+            if (this.app.image !== source || restoration !== JSON.stringify({ crop: this.app.crop,
+                state: this.app.state, curves: this.app.curveEditor.channels })) return;
+            this.app.maskEngine.masks = restoringMasks.masks;
+            this.app.maskEngine.activeMaskIndex = restoringMasks.activeMaskIndex;
+            this.app.maskEngine._nextMaskId = restoringMasks._nextMaskId;
+            if (legacy && crop) this.app._importStatus('Legacy crop restored from the original photo. Previously discarded mask coverage/corners cannot be recovered.');
 
             // Update mask UI so they appear in the list and are editable
             this.app._updateMaskList();
             this.app._syncMaskSliders();
             this.app._hideCompositeOverlay();
             this.app._pushHistory();
+            if (editData.geometryVersion === 1 && editData.history) await this._restoreHistory(editData.history, source);
             this.app._render();
         }
+        if (photo) photo._restoreFailed = false;
+        } catch (error) {
+            if (photo) photo._restoreFailed = true;
+            error.message += ' Saving is paused to protect the stored edit.';
+            throw error;
+        } finally { this._restoring = false; }
+    }
+
+    async _restoreHistory(saved, source) {
+        if (saved.version !== 1 || !Array.isArray(saved.entries) || !saved.entries.length ||
+            saved.entries.length > 100 || !Number.isInteger(saved.index) || saved.index < 0 ||
+            saved.index >= saved.entries.length || !Array.isArray(saved.pixels) || saved.pixels.length > 200 ||
+            saved.pixels.some(data => typeof data !== 'string' || !data.startsWith('data:image/png;base64,')) ||
+            saved.pixels.reduce((n, data) => n + data.length, 0) > 128 * 1024 * 1024)
+            throw new Error('Saved undo history is invalid. Current edits are retained.');
+        let bytes = 0;
+        const canvases = [];
+        for (const data of saved.pixels) {
+            const image = new Image();
+            image.src = data;
+            await image.decode();
+            if (this.app.image !== source) return;
+            bytes += image.width * image.height * 4;
+            if (image.width > 2048 || image.height > 2048 || bytes > 96 * 1024 * 1024)
+                throw new Error('Saved undo history exceeds the mask memory limit.');
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width; canvas.height = image.height;
+            canvas.getContext('2d').drawImage(image, 0, 0);
+            canvases.push(canvas);
+        }
+        const entries = saved.entries.map(entry => {
+            const crop = CropGeometry.validate(entry.crop, this.app.sourceWidth, this.app.sourceHeight);
+            if (!entry.state || !Array.isArray(entry.masks) || entry.masks.length > 200)
+                throw new Error('Invalid saved undo entry.');
+            const curves = ReviewContract.validateCurves(entry.curves);
+            const masks = entry.masks.map(mask => {
+                if (!Number.isInteger(mask.pixels) || !canvases[mask.pixels] ||
+                    (mask.type === 'polygon' && !PolygonGeometry.validParams(mask.params)))
+                    throw new Error('Invalid saved undo mask.');
+                const { pixels, ...metadata } = mask;
+                return { ...metadata, canvas: canvases[pixels] };
+            });
+            const state = { ...this.app._defaultState(), ...entry.state };
+            const signature = JSON.stringify({ crop, state, curves, masks: masks.map(({ canvas, ...m }) => m) });
+            return { crop, curves, masks, state: JSON.stringify(state), signature };
+        });
+        if (this.app.image !== source) return;
+        this.app.history = entries;
+        this.app.historyIndex = saved.index;
+        this.app._restoreHistory();
+        // Recreate the same canonical signature used by ordinary edits, without
+        // truncating saved redo entries or duplicating the restored transaction.
+        const current = entries[saved.index];
+        current.signature = JSON.stringify({ crop: this.app.crop || null, state: this.app.state,
+            curves: this.app.curveEditor.channels, masks: this.app.maskEngine.describeMasks() });
+        this.app.maskEngine._nextMaskId = Math.max(this.app.maskEngine._nextMaskId,
+            ...entries.flatMap(entry => entry.masks.map(mask => mask.id || 0)));
+        this.app._updateHistoryButtons();
     }
 
     clearAll() {
@@ -3466,8 +3565,9 @@ class Library {
         this._renderFilmstrip();
         if (this.db) {
             try {
-                const tx = this.db.transaction(['edits', 'thumbs', 'config'], 'readwrite');
+                const tx = this.db.transaction(['edits', 'thumbs', 'config', 'photos'], 'readwrite');
                 tx.objectStore('edits').clear();
+                tx.objectStore('photos').clear();
                 tx.objectStore('thumbs').clear();
                 tx.objectStore('config').delete('dirHandle');
             } catch (e) { /* ignore */ }
@@ -3750,14 +3850,55 @@ class BatchProcessor {
     }
 
     async _processOneImage(file, batchGL, offCanvas, mimeType, quality, format) {
+        const library = window.library;
+        await library?._saveCurrentEdits();
+        const photo = library?.photos.find(p => p.id === library._photoId(file) ||
+            (p.fileHandle && p.name === file.name));
+        const saved = photo ? await library._readEdits(photo) : null;
         const { image: img } = await ImageImport.decode(file, {
             signal: this._controller?.signal,
-            halfSize: document.getElementById('raw-half-size').checked,
+            halfSize: saved?.rawHalfSize ?? document.getElementById('raw-half-size').checked,
             onStatus: text => this._setStatus(`${file.name}: ${text}`),
         });
         try {
             const item = this.files.find(item => item.file === file);
             if (item) { item.thumb = ImageImport.thumb(img); this._renderList(); }
+            if (saved?.state) {
+                const [width, height] = CropGeometry.size(img);
+                const legacy = saved.geometryVersion !== 1;
+                if (saved.geometryVersion !== undefined && legacy) throw new Error('Unsupported saved crop version.');
+                const crop = legacy ? CropGeometry.legacy(saved.sourceCrops || [], width, height)
+                    : CropGeometry.validate(saved.crop, width, height);
+                const geometry = CropGeometry.matrix(crop, width, height);
+                const masks = new MaskEngine({ imageWidth: width, imageHeight: height });
+                for (const stored of saved.masks || []) {
+                    const mask = masks.createMask(stored.type);
+                    Object.assign(mask, { inverted: stored.inverted, visible: stored.visible, blend: stored.blend,
+                        opacity: stored.opacity ?? 1, adjustments: ManualControls.normalize(stored.adjustments) });
+                    if (stored.type === 'polygon') {
+                        const points = legacy && crop ? stored.params.points.map(p => CropGeometry.point(geometry, p))
+                            : stored.params.points;
+                        if (!masks.setPolygon(mask, points, stored.params.feather)) throw new Error('Invalid saved polygon.');
+                    } else if (stored.canvasData) {
+                        const bitmap = new Image(); bitmap.src = stored.canvasData;
+                        await bitmap.decode();
+                        if (legacy && crop) CropGeometry.draw(mask.ctx, bitmap, geometry, mask.canvas.width, mask.canvas.height);
+                        else mask.ctx.drawImage(bitmap, 0, 0, mask.canvas.width, mask.canvas.height);
+                        masks.touch(mask);
+                    }
+                }
+                batchGL.loadImage(img); batchGL.setCrop(crop);
+                batchGL.updateCurveLUT(window.app.curveEditor.getLUT(ReviewContract.validateCurves(saved.curves)));
+                const state = { ...window.app._defaultState(), ...saved.state, showOriginal: false };
+                if (legacy && crop) state.motionAngle = ((state.motionAngle - crop.rotation) % 180 + 180) % 180;
+                const output = await batchGL.exportImageAsync(img, state, masks.masks.filter(m => m.visible), 1,
+                    { signal: this._controller?.signal });
+                try {
+                    const blob = await new Promise(resolve => output.toBlob(resolve, mimeType, quality));
+                    if (!blob) throw new Error('Could not encode batch export.');
+                    return blob;
+                } finally { output.width = output.height = 1; }
+            }
             return await new Promise((resolve, reject) => {
                     try {
                         // Load into GL

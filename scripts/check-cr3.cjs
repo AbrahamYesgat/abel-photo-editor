@@ -90,11 +90,12 @@ const { createServer } = require('../server/index.js');
                 const cancelled = await pending;
                 const cancelledUnchanged = app.image === before;
                 const crop = app.cropTool;
+                crop.activate();
                 crop.cropX = 0.1; crop.cropY = 0.1; crop.cropW = 0.5; crop.cropH = 0.5; crop.rotation = 0;
                 crop.apply();
                 await new Promise((resolve, reject) => {
                     const start = Date.now();
-                    const check = () => app.image !== before ? resolve() : Date.now() - start > 10000 ? reject(new Error('Crop timed out')) : setTimeout(check, 20);
+                    const check = () => app.crop && app.image === before ? resolve() : Date.now() - start > 10000 ? reject(new Error('Crop timed out')) : setTimeout(check, 20);
                     check();
                 });
                 const cropped = [app.imageWidth, app.imageHeight];

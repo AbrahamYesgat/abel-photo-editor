@@ -85,7 +85,7 @@ const { createServer } = require('../server/index.js');
             check(JSON.stringify(app.curveEditor.channels) === beforeCurves, 'crop undo preserves all curves');
             check(JSON.stringify(app.maskEngine.describeMasks()) === beforeMasks, 'crop undo restores masked texture');
             let sidecar;
-            const photo = { id: 'texture-fixture', name: 'texture.png', fileHandle: {} };
+            const photo = { id: 'texture-fixture', name: 'texture-export.png', fileHandle: {} };
             const library = Object.create(Library.prototype);
             Object.assign(library, { app, photos: [photo], activeIndex: 0, db: null,
                 dirHandle: { getFileHandle: async () => ({
@@ -102,6 +102,7 @@ const { createServer } = require('../server/index.js');
             check(app.state.texture === 60 && app.state.textureEnabled === false, 'sidecar restores saved amount/switch');
             check(app.maskEngine.masks[0].adjustments.texture === -30, 'sidecar restores local texture');
             const legacy = JSON.parse(sidecar);
+            delete legacy.history;
             delete legacy.state.texture; delete legacy.state.textureEnabled; delete legacy.masks[0].adjustments.texture;
             sidecar = JSON.stringify(legacy);
             await library._restoreEdits(photo);

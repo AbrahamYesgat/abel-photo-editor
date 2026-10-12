@@ -89,12 +89,13 @@ class MaskEngine {
 
     buildReviewMasks(regions) {
         // Stage on a separate engine: a failed allocation cannot partially change the edit.
-        const staging = new MaskEngine(this.app);
+        const staging = new MaskEngine(this.app.crop
+            ? { imageWidth: this.app.imageWidth, imageHeight: this.app.imageHeight } : this.app);
         staging._nextMaskId = this._nextMaskId;
         const geometryCache = new Map();
         for (const region of regions) {
             const g = region.geometry;
-            const key = JSON.stringify([this.app.imageWidth, this.app.imageHeight, g]);
+            const key = JSON.stringify([this.app.imageWidth, this.app.imageHeight, this.app.crop, g]);
             const cached = this._reviewGeometry?.get(key);
             let mask;
             if (cached) {
@@ -109,6 +110,7 @@ class MaskEngine {
             if (!cached) {
                 if (g.type === 'radial') staging.createRadialMask(g.x * w, g.y * h, g.width * w, g.height * h, g.feather * 100);
                 else staging.createLinearMask(g.x * w, g.y * h, g.endX * w, g.endY * h, true);
+                if (this.app.crop) this.projectFromView(mask);
             }
             mask.sharedPixels = true;
             geometryCache.set(key, { type: mask.type, canvas: mask.canvas, params: mask.params,
@@ -124,8 +126,8 @@ class MaskEngine {
     }
 
     createMask(type) {
-        const w = this.app.imageWidth;
-        const h = this.app.imageHeight;
+        const w = this.app.sourceWidth || this.app.imageWidth;
+        const h = this.app.sourceHeight || this.app.imageHeight;
         if (!w || !h) return null;
 
         // Cap mask canvas for performance on huge images
@@ -164,39 +166,39 @@ class MaskEngine {
         return mask;
     }
 
+    projectFromView(mask) {
+        const source = mask.canvas, m = this.app._geometry();
+        const scale = Math.min(1, 2048 / Math.max(this.app.sourceWidth, this.app.sourceHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(this.app.sourceWidth * scale));
+        canvas.height = Math.max(1, Math.round(this.app.sourceHeight * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'black'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        CropGeometry.draw(ctx, source, m, canvas.width, canvas.height);
+        const p = mask.params;
+        const mapped = (x, y) => {
+            const point = CropGeometry.point(m, { x: x / source.width, y: y / source.height });
+            return { x: point.x * canvas.width, y: point.y * canvas.height };
+        };
+        if (mask.type === 'radial') {
+            const c = mapped(p.cx, p.cy);
+            mask.params = { ...p, cx: c.x, cy: c.y,
+                rx: p.rx / source.width * this.app.imageWidth * canvas.width / this.app.sourceWidth,
+                ry: p.ry / source.height * this.app.imageHeight * canvas.height / this.app.sourceHeight,
+                angle: -this.app.crop.rotation };
+        } else if (mask.type === 'gradient') {
+            const a = mapped(p.x1, p.y1), b = mapped(p.x2, p.y2);
+            mask.params = { ...p, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+        }
+        mask.canvas = canvas; mask.ctx = ctx;
+    }
+
     setPolygon(mask, points, feather = 0) {
         if (mask?.type !== 'polygon' || !PolygonGeometry.validParams({ points, feather })) return false;
         this.touch(mask);
         PolygonGeometry.rasterize(mask.ctx, mask.canvas.width, mask.canvas.height, points, feather);
         mask.params = { points: points.map(p => ({ x: p.x, y: p.y })), feather };
         return true;
-    }
-
-    cropDetectedMasks({ x, y, width, height, rotation, sourceWidth, sourceHeight }) {
-        return this.masks.filter(mask => mask.detection || mask.type === 'polygon' || mask.polygonBaked).map(mask => {
-            const scale = Math.min(1, 2048 / Math.max(width, height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.max(1, Math.round(width * scale));
-            canvas.height = Math.max(1, Math.round(height * scale));
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.scale(canvas.width / width, canvas.height / height);
-            ctx.translate(-x + sourceWidth / 2, -y + sourceHeight / 2);
-            ctx.rotate(rotation * Math.PI / 180);
-            ctx.translate(-sourceWidth / 2, -sourceHeight / 2);
-            ctx.drawImage(mask.canvas, 0, 0, sourceWidth, sourceHeight);
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            const result = { ...mask, canvas, ctx, revision: (mask.revision || 0) + 1, sharedPixels: false };
-            if (mask.type === 'polygon') {
-                // A crop can split a concave polygon into disconnected pieces.
-                // Preserve its exact painted coverage rather than invent connecting edges.
-                Object.assign(result, { type: 'brush', params: null, polygonBaked: true,
-                    name: `${mask.name || 'Polygon'} (cropped)`,
-                    reason: 'Crop preserved this polygon as a brush mask. Corners are baked; Brush / Erase still works. Undo crop restores editable corners.' });
-            }
-            return result;
-        });
     }
 
     _defaultMaskAdjustments() {
@@ -239,7 +241,7 @@ class MaskEngine {
     _brushStroke(mask, x, y) {
         this.touch(mask);
         const ctx = mask.ctx;
-        const size = this.brushSize * mask.canvas.width / this.app.imageWidth;
+        const size = this.brushSize * mask.canvas.width / (this.app.sourceWidth || this.app.imageWidth);
         const feather = this.brushFeather / 100;
         const flow = this.brushFlow / 100;
 
@@ -256,23 +258,42 @@ class MaskEngine {
         }
 
         ctx.fillStyle = gradient;
+        ctx.save();
+        this.clipToView(mask);
         ctx.fillRect(x - size / 2, y - size / 2, size, size);
+        ctx.restore();
+    }
+
+    clipToView(mask) {
+        if (!this.app.crop) return;
+        const ctx = mask.ctx;
+        const corners = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]
+            .map(p => CropGeometry.point(this.app._geometry(), p));
+        ctx.beginPath();
+        corners.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p.x * mask.canvas.width, p.y * mask.canvas.height));
+        ctx.closePath(); ctx.clip();
     }
 
     // Radial gradient mask
     refineRadial(key, percent) {
         const mask = this.getActiveMask();
         if (mask?.type !== 'radial' || !mask.params || !Number.isFinite(percent)) return false;
+        if (key === 'angle') {
+            if (percent < -180 || percent > 180) return false;
+            const p = { ...mask.params, angle: percent };
+            this.createRadialMask(p.cx, p.cy, p.rx, p.ry, p.feather, p.angle);
+            return true;
+        }
         const dimensions = { cx: mask.canvas.width, cy: mask.canvas.height,
             rx: mask.canvas.width, ry: mask.canvas.height, feather: 100 };
         if (!Object.hasOwn(dimensions, key) || percent < (key === 'rx' || key === 'ry' ? 0.1 : 0) ||
             percent > 100) return false;
         const p = { ...mask.params, [key]: percent * dimensions[key] / 100 };
-        this.createRadialMask(p.cx, p.cy, p.rx, p.ry, p.feather);
+        this.createRadialMask(p.cx, p.cy, p.rx, p.ry, p.feather, p.angle);
         return true;
     }
 
-    createRadialMask(cx, cy, rx, ry, feather) {
+    createRadialMask(cx, cy, rx, ry, feather, angle = 0) {
         const mask = this.getActiveMask();
         if (!mask || mask.type !== 'radial') return;
         this.touch(mask);
@@ -284,7 +305,7 @@ class MaskEngine {
         ctx.fillStyle = 'black';
         ctx.fillRect(0, 0, w, h);
 
-        mask.params = { cx, cy, rx, ry, feather };
+        mask.params = { cx, cy, rx, ry, feather, ...(angle ? { angle } : {}) };
 
         // Draw radial gradient
         const maxR = Math.max(rx, ry);
@@ -294,6 +315,7 @@ class MaskEngine {
 
         ctx.save();
         ctx.translate(cx, cy);
+        ctx.rotate(angle * Math.PI / 180);
         ctx.scale(rx / maxR, ry / maxR);
         ctx.translate(-cx, -cy);
         ctx.fillStyle = gradient;
@@ -345,7 +367,7 @@ class MaskEngine {
         }
 
         // Scale click coordinates
-        const scaleToMask = mw / this.app.imageWidth;
+        const scaleToMask = mw / (this.app.sourceWidth || this.app.imageWidth);
         const scaleToAnalysis = aw / mw;
         const ax = Math.min(aw - 1, Math.max(0, Math.round(imgX * scaleToMask * scaleToAnalysis)));
         const ay = Math.min(ah - 1, Math.max(0, Math.round(imgY * scaleToMask * scaleToAnalysis)));
@@ -489,6 +511,8 @@ class MaskEngine {
         selCtx.putImageData(selData, 0, 0);
 
         const ctx = mask.ctx;
+        ctx.save();
+        this.clipToView(mask);
         if (addMode) {
             ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(selCanvas, 0, 0, mw, mh);
@@ -506,6 +530,7 @@ class MaskEngine {
             ctx.clearRect(0, 0, mw, mh);
             ctx.drawImage(selCanvas, 0, 0, mw, mh);
         }
+        ctx.restore();
     }
 
     // Get combined mask canvas (all visible masks OR'd together)
@@ -550,8 +575,8 @@ class MaskEngine {
         const mask = this.getActiveMask();
         if (!mask) return;
         if (mask.type !== 'wand') {
-            imgX *= mask.canvas.width / this.app.imageWidth;
-            imgY *= mask.canvas.height / this.app.imageHeight;
+            imgX *= mask.canvas.width / (this.app.sourceWidth || this.app.imageWidth);
+            imgY *= mask.canvas.height / (this.app.sourceHeight || this.app.imageHeight);
         }
 
         if (mask.type === 'brush') {
@@ -568,8 +593,8 @@ class MaskEngine {
         const mask = this.getActiveMask();
         if (!mask) return;
         if (mask.type !== 'wand') {
-            imgX *= mask.canvas.width / this.app.imageWidth;
-            imgY *= mask.canvas.height / this.app.imageHeight;
+            imgX *= mask.canvas.width / (this.app.sourceWidth || this.app.imageWidth);
+            imgY *= mask.canvas.height / (this.app.sourceHeight || this.app.imageHeight);
         }
 
         if (mask.type === 'brush') {
@@ -601,7 +626,7 @@ class MaskEngine {
         const mask = this.getActiveMask();
         if (!mask) return null;
 
-        const key = `${mask.id}:${mask.revision}:${mask.inverted}:${displayWidth}:${displayHeight}`;
+        const key = `${mask.id}:${mask.revision}:${mask.inverted}:${displayWidth}:${displayHeight}:${JSON.stringify(this.app.crop)}`;
         if (this._overlayKey === key && this._overlayMask === mask.canvas) return this._overlayCanvas;
         const overlay = this._overlayCanvas ||= document.createElement('canvas');
         if (overlay.width !== displayWidth) overlay.width = displayWidth;
@@ -609,7 +634,9 @@ class MaskEngine {
         const ctx = overlay.getContext('2d', { willReadFrequently: true });
 
         ctx.clearRect(0, 0, displayWidth, displayHeight);
-        ctx.drawImage(mask.canvas, 0, 0, displayWidth, displayHeight);
+        if (this.app._geometry) CropGeometry.draw(ctx, mask.canvas,
+            CropGeometry.inverse(this.app._geometry()), displayWidth, displayHeight);
+        else ctx.drawImage(mask.canvas, 0, 0, displayWidth, displayHeight);
 
         // Colorize: show red tint for selected areas
         const imgData = ctx.getImageData(0, 0, displayWidth, displayHeight);

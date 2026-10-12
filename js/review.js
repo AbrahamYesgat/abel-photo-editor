@@ -623,6 +623,7 @@ class ReviewPanel {
                 state: this.app.state,
                 curves: this.app.curveEditor.channels,
                 size: [this.app.imageWidth, this.app.imageHeight],
+                crop: this.app.crop || null,
                 masks: this.app.maskEngine.describeMasks(),
             }),
         };

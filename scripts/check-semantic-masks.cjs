@@ -195,7 +195,7 @@ const { createServer } = require('../server/index.js');
                 app.cropTool.rotation = 4;
                 app.cropTool.apply();
             });
-            await page.waitForFunction(() => app.image !== window.__preCropImage && !app.cropTool.active, null, { timeout: 30000 });
+            await page.waitForFunction(() => app.image === window.__preCropImage && !!app.crop && !app.cropTool.active, null, { timeout: 30000 });
             const crop = await page.evaluate(async () => {
                 const masks = app.maskEngine.masks.map(m => ({ kind: m.detection.kind, png: m.canvas.toDataURL() }));
                 await library._saveCurrentEdits();

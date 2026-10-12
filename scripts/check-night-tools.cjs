@@ -169,13 +169,9 @@ const { createServer } = require('../server/index.js');
             app.cropTool.cropX = .1; app.cropTool.cropY = .1;
             app.cropTool.cropW = .8; app.cropTool.cropH = .8;
             app.cropTool.apply();
-            const deadline = performance.now() + 5000;
-            while (app.image === beforeSource && performance.now() < deadline) {
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
-            check(app.image !== beforeSource, 'crop completes');
-            check(app.state.motionAngle === 120 && app.state.motionLength === 7,
-                'crop rotation changes PSF direction, not native-pixel distance');
+            check(app.image === beforeSource && app.crop.rotation === 30 && !app.cropTool.active, 'crop retains source');
+            check(app.state.motionAngle === 90 && app.state.motionLength === 7,
+                'crop rotates the viewport, leaving source-space PSF direction and distance unchanged');
             app._undo();
             check(app.state.motionAngle === 90 && app.image === beforeSource, 'crop undo restores PSF and source');
             check(pixels(engine.canvas).every((v, i) => v === beforeCrop[i]), 'crop undo restores exact restored composite');

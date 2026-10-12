@@ -18,7 +18,7 @@ const { createServer } = require('../server/index.js');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(process.env.BASE_URL || `http://127.0.0.1:${server.address().port}/`);
         await page.waitForFunction(() => window.app?.review);
-        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic, manual, tonal }) => {
+        const metrics = await page.evaluate(async ({ mobile, skipExport, nightTools, texture, semantic, manual, tonal, cropHistory }) => {
             const source = document.createElement('canvas');
             source.width = 6000; source.height = 4000;
             const ctx = source.getContext('2d');
@@ -90,6 +90,30 @@ const { createServer } = require('../server/index.js');
             app._canvasPointerUp();
             app.maskMode = false;
             app.showMaskOverlay = false;
+            let cropMemory = null;
+            if (cropHistory) {
+                const original = app.image;
+                app.history = []; app.historyIndex = -1; app._pushHistory();
+                for (let i = 0; i < 12; i++) {
+                    app.cropTool.activate();
+                    Object.assign(app.cropTool, { cropX: .05 + i / 100, cropY: .1,
+                        cropW: .7 - i / 100, cropH: .7, rotation: i % 3 });
+                    app.cropTool.apply();
+                    app.glEngine.gl.finish();
+                    await new Promise(requestAnimationFrame);
+                    if (app.image !== original) throw Error('Crop allocated a replacement source');
+                }
+                const canvases = new Set(app.history.flatMap(entry => entry.masks.map(m => m.canvas)));
+                cropMemory = { entries: app.history.length, uniqueMaskCanvases: canvases.size,
+                    maskBytes: [...canvases].reduce((n, c) => n + c.width * c.height * 4, 0),
+                    sameSource: app.image === original };
+                for (let i = 0; i < 12; i++) {
+                    app._undo();
+                    app.glEngine.gl.finish();
+                    await new Promise(requestAnimationFrame);
+                }
+                if (app.crop !== null) throw Error('Repeated 24MP crop undo did not reach original');
+            }
             let exported = null;
             if (!mobile && !skipExport) {
                 const start = performance.now();
@@ -99,19 +123,24 @@ const { createServer } = require('../server/index.js');
                 canvas.width = canvas.height = 1;
             }
             app._render();
-            return { mobile, nightTools, texture, tonal, times, latency, brushLatency, exported, render: [app.glEngine.canvas.width, app.glEngine.canvas.height],
+            return { mobile, nightTools, texture, tonal, cropMemory, times, latency, brushLatency, exported, render: [app.glEngine.canvas.width, app.glEngine.canvas.height],
                 masks: app.maskEngine.masks.map(mask => [mask.canvas.width, mask.canvas.height]),
                 composite: !!document.getElementById('composite-overlay'),
                 glError: app.glEngine.gl.getError(), contextLost: app.glEngine.gl.isContextLost() };
         }, { mobile, skipExport: !!process.env.SKIP_EXPORT, nightTools: !!process.env.NIGHT_TOOLS,
             texture: !!process.env.TEXTURE, semantic: !!process.env.SEMANTIC, manual: !!process.env.MANUAL_CONTROLS,
-            tonal: !!process.env.TONAL_TOOLS });
+            tonal: !!process.env.TONAL_TOOLS, cropHistory: !!process.env.CROP_HISTORY });
         console.log(JSON.stringify(metrics));
         assert.deepEqual(errors, []);
         assert.equal(metrics.glError, 0);
         assert.equal(metrics.contextLost, false);
         assert.ok(Math.max(...metrics.render) <= 1600);
         assert.equal(metrics.composite, false);
+        if (process.env.CROP_HISTORY) {
+            assert.equal(metrics.cropMemory.entries, 13);
+            assert.equal(metrics.cropMemory.uniqueMaskCanvases, 6);
+            assert.equal(metrics.cropMemory.sameSource, true);
+        }
         if (process.env.MANUAL_CONTROLS) {
             assert.ok(Math.max(...metrics.latency.slice(1)) < 1000, 'warm manual mask edits must not stall for seconds');
             assert.ok(Math.max(...metrics.brushLatency.slice(1)) < 1000, 'warm brush edits must remain responsive');

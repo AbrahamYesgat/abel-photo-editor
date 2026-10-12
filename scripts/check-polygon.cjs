@@ -34,7 +34,7 @@ const { createServer } = require('../server/index.js');
                 ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
                 const blob = await new Promise(resolve => c.toBlob(resolve));
                 c.width = c.height = 1;
-                await app._loadFile(new File([blob], 'polygon.png', { type: 'image/png' }));
+                await app._loadFile(new File([blob], 'polygon.png', { type: 'image/png', lastModified: 1234 }));
             }, [w, h]);
             await load();
             const frame = () => page.evaluate(() => new Promise(resolve =>
@@ -211,11 +211,10 @@ const { createServer } = require('../server/index.js');
             await page.evaluate(() => app._undo());
             await page.locator('#mask-list .mask-item').first().click();
             const persistence = await page.evaluate(async () => {
-                let saved;
-                const old = library.db;
-                library.photos = [{ id: 'polygon-test', name: 'polygon.png' }]; library.activeIndex = 0;
-                library.db = { transaction: () => ({ objectStore: () => ({ put: data => { saved = data; } }) }) };
-                await library._saveCurrentEdits(); library.db = old;
+                library.photos = [{ id: library._photoId(app._originalFile), name: 'polygon.png', file: app._originalFile }];
+                library.activeIndex = 0;
+                await library._saveCurrentEdits();
+                const saved = await library._readEdits(library.photos[0]);
                 const before = app.maskEngine.getActiveMask().canvas.toDataURL();
                 await library._restoreEdits(library.photos[0], saved);
                 const restored = app.maskEngine.getActiveMask().canvas.toDataURL();
@@ -241,7 +240,7 @@ const { createServer } = require('../server/index.js');
             assert.deepEqual((await snapshot()).pixels, savedSnapshot.pixels);
             await page.reload(); await page.waitForFunction(() => window.app?.polygon && window.library?.db);
             await load();
-            await page.evaluate(() => library._restoreEdits({ id: 'polygon-test', name: 'polygon.png' }));
+            await page.evaluate(() => library._restoreEdits({ id: library._photoId(app._originalFile), name: 'polygon.png' }));
             assert.deepEqual((await snapshot()).pixels, savedSnapshot.pixels, 'real reload restores IndexedDB mask pixels');
             assert.deepEqual((await snapshot()).masks[0].params, savedSnapshot.masks[0].params);
             await tab(); await page.waitForTimeout(380);
@@ -251,14 +250,13 @@ const { createServer } = require('../server/index.js');
                 fs.mkdirSync(process.env.ARTIFACT_DIR, { recursive: true });
                 await page.screenshot({ path: `${process.env.ARTIFACT_DIR}/polygon-${mobile ? 'mobile' : 'desktop'}.png` });
             }
-            // Crop preserves the exact old raster selection, then undo restores editable corners.
+            // Crop only projects the source selection; vertices and coverage remain intact.
             const preCrop = await snapshot();
             await page.evaluate(() => {
                 const m = app.maskEngine.getActiveMask(), expected = document.createElement('canvas');
-                expected.width = Math.round(768 * .7); expected.height = Math.round(512 * .7);
+                expected.width = m.canvas.width; expected.height = m.canvas.height;
                 const ctx = expected.getContext('2d');
-                ctx.translate(-Math.round(768 * .1), -Math.round(512 * .1));
-                ctx.drawImage(m.canvas, 0, 0, 768, 512);
+                ctx.drawImage(m.canvas, 0, 0);
                 window.expectedPolygonCrop = expected.toDataURL();
                 expected.width = expected.height = 1;
                 app._exitMaskMode(); app.cropTool.activate();
@@ -266,10 +264,10 @@ const { createServer } = require('../server/index.js');
                 app.cropTool.apply();
             });
             await page.waitForFunction(() => app.imageWidth === 538);
-            assert.equal((await snapshot()).masks[0].type, 'brush');
-            assert.equal((await snapshot()).masks[0].polygonBaked, true);
+            assert.equal((await snapshot()).masks[0].type, 'polygon');
+            assert.deepEqual((await snapshot()).masks[0].params, preCrop.masks[0].params);
             assert.equal(await page.evaluate(() => app.maskEngine.getActiveMask().canvas.toDataURL() === expectedPolygonCrop),
-                true, 'crop coverage matches the exact cropped mask raster');
+                true, 'crop retains the exact full-source mask raster');
             await page.evaluate(() => app._undo());
             assert.equal(await page.evaluate(() => app.imageWidth), 768);
             assert.deepEqual((await snapshot()).masks[0].params, preCrop.masks[0].params);
@@ -306,7 +304,8 @@ const { createServer } = require('../server/index.js');
             assert.ok(quality.maxError < 8, JSON.stringify(quality));
             assert.equal(quality.outside, 0);
             // Invalid completion never creates a phantom mask; Enter and Escape work without a focused input.
-            await start(); await tap(.1, .1); await tap(.9, .9); await tap(.1, .9); await tap(.9, .1);
+            // Avoid the floating Fit button at the upper-right on narrow screens.
+            await start(); await tap(.2, .2); await tap(.8, .8); await tap(.2, .8); await tap(.8, .2);
             before = await snapshot();
             await page.click('#polygon-finish');
             assert.equal((await snapshot()).masks.length, before.masks.length);
@@ -320,8 +319,8 @@ const { createServer } = require('../server/index.js');
             await page.keyboard.press('Enter');
             assert.equal((await snapshot()).masks.length, before.masks.length + 1);
             await start();
-            for (const p of [[.1, .1], [.9, .1], [.9, .9], [.5, .5], [.1, .9]]) await tap(...p);
-            await tap(.1, .1);
+            for (const p of [[.2, .2], [.8, .2], [.8, .8], [.5, .5], [.2, .8]]) await tap(...p);
+            await tap(.2, .2);
             assert.equal((await snapshot()).masks.at(-1).params.points.length, 5, 'concave shape closes via first point');
             await start(); await tap(.2, .2);
             await load(512, 768);

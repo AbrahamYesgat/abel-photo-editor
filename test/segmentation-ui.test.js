@@ -9,7 +9,7 @@ function harness() {
     const elements = new Map(), workers = [], timers = new Map();
     let nextTimer = 0;
     const element = () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {} }, hidden: false,
-        getContext: () => ({ drawImage() {}, fillRect() {}, putImageData() {},
+        getContext: () => ({ drawImage() {}, fillRect() {}, putImageData() {}, save() {}, restore() {}, transform() {},
             getImageData: () => ({ data: new Uint8ClampedArray(768 * 512 * 4) }) }) });
     const document = { baseURI: 'https://example.com/editor/', addEventListener() {},
         getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },
@@ -22,7 +22,7 @@ function harness() {
     }
     const schedule = fn => { timers.set(++nextTimer, fn); return nextTimer; };
     const context = vm.createContext({ document, window: { addEventListener() {} }, Worker, URL,
-        SemanticMasks, ManualControls: require('../js/manual-controls.js'), console, Uint8ClampedArray, isSecureContext: true,
+        SemanticMasks, CropGeometry: require('../js/crop-geometry.js'), ManualControls: require('../js/manual-controls.js'), console, Uint8ClampedArray, isSecureContext: true,
         ImageData: class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } },
         setTimeout: schedule, setInterval: schedule, clearTimeout: id => timers.delete(id), clearInterval: id => timers.delete(id) });
     vm.runInContext(fs.readFileSync('js/mask-engine.js', 'utf8') + '\nthis.MaskEngine = MaskEngine;', context);

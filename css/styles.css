@@ -614,12 +614,19 @@ html, body {
 
 .mcrop-slider {
     flex: 1;
+    min-width: 0;
     height: 4px;
     -webkit-appearance: none;
     appearance: none;
     background: rgba(255,255,255,0.2);
     border-radius: 2px;
     outline: none;
+}
+
+#mcrop-reset {
+    font-size: 12px;
+    white-space: nowrap;
+    padding: 8px;
 }
 
 .mcrop-slider::-webkit-slider-thumb {

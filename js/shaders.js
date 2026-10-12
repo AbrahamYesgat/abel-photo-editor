@@ -6,10 +6,11 @@ attribute vec2 a_position;
 attribute vec2 a_texCoord;
 varying vec2 v_texCoord;
 uniform vec4 u_region;
+uniform mat3 u_geometry;
 
 void main() {
     gl_Position = vec4(a_position, 0.0, 1.0);
-    v_texCoord = u_region.xy + a_texCoord * u_region.zw;
+    v_texCoord = (u_geometry * vec3(u_region.xy + a_texCoord * u_region.zw, 1.)).xy;
 }
 `;
 
@@ -140,6 +141,9 @@ float rand(vec2 co) {
 
 // ======== Main ========
 void main() {
+    if (any(lessThan(v_texCoord, vec2(0.))) || any(greaterThan(v_texCoord, vec2(1.)))) {
+        gl_FragColor = vec4(0.); return;
+    }
     vec4 texColor = sampleImage(v_texCoord);
     vec3 color = texColor.rgb;
     vec3 original = color;
